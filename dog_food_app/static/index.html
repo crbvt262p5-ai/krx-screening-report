@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>멍칼로리 계산기</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Dog Food & Treat Tracker</p>
+        <h1>멍칼로리 계산기</h1>
+        <p class="hero-copy">
+          먼저 강아지 프로필을 등록하고, 그다음 사료와 간식을 검색해 하루 칼로리를 빠르게 계산하세요.
+        </p>
+      </header>
+
+      <main class="stack">
+        <section class="panel onboarding-panel" id="profile-panel">
+          <div class="section-head">
+            <h2>1. 강아지 프로필</h2>
+            <p>앱을 처음 쓰면 프로필부터 저장해 주세요.</p>
+          </div>
+
+          <form id="profile-form" class="form-grid compact-grid" method="post" action="/profile/save">
+            <label>
+              이름
+              <input id="dog-name" name="dog_name" type="text" placeholder="예: 코코" />
+            </label>
+            <label>
+              체중(kg)
+              <input id="dog-weight" name="dog_weight" type="number" min="0" step="0.1" placeholder="예: 4.2" />
+            </label>
+            <label>
+              나이
+              <select id="dog-age-group" name="dog_age_group">
+                <option value="adult" selected>성견</option>
+                <option value="puppy">퍼피 / 성장기</option>
+                <option value="senior">노령견</option>
+              </select>
+            </label>
+            <label>
+              활동량
+              <select id="dog-activity" name="dog_activity">
+                <option value="1.2">낮음 / 체중관리</option>
+                <option value="1.6" selected>보통</option>
+                <option value="2.0">활동적</option>
+                <option value="3.0">매우 활동적 / 성장기</option>
+              </select>
+            </label>
+          </form>
+
+          <div class="actions">
+            <button id="save-profile-button" type="submit" form="profile-form">프로필 저장하고 시작</button>
+          </div>
+
+          <div id="profile-status" class="status muted">
+            이름과 체중만 있어도 시작할 수 있어요.
+          </div>
+        </section>
+
+        <section class="panel summary-banner hidden" id="profile-summary-panel">
+          <div class="section-head">
+            <h2>등록된 프로필</h2>
+            <p id="profile-summary-copy">프로필을 불러오는 중입니다.</p>
+          </div>
+          <div class="actions">
+            <button id="edit-profile-button" type="button" class="ghost">프로필 수정</button>
+          </div>
+        </section>
+
+        <div id="app-shell" class="hidden">
+          <section class="grid">
+            <section class="panel search-panel">
+              <div class="section-head">
+                <h2>2. 제품 검색</h2>
+                <p>사료인지 간식인지 고르고 제품명을 검색해 주세요.</p>
+              </div>
+
+              <form id="search-form" class="search-stack">
+                <select id="product-kind">
+                  <option value="treat">간식</option>
+                  <option value="food">사료</option>
+                </select>
+                <input
+                  id="search-input"
+                  name="q"
+                  type="text"
+                  placeholder="예: 오리젠, 닥터할리, 로얄캐닌"
+                  autocomplete="off"
+                />
+                <button type="submit">검색</button>
+              </form>
+
+              <div id="search-status" class="status muted">
+                검색할 제품 종류를 고른 뒤 이름을 입력해 주세요.
+              </div>
+
+              <div id="result-list" class="result-list"></div>
+            </section>
+
+            <section class="panel intake-panel">
+              <div class="section-head">
+                <h2>3. 오늘 급여 입력</h2>
+                <p>기본 입력만 먼저 채우고, 필요할 때만 고급값을 열어 보정하세요.</p>
+              </div>
+
+              <div class="slot-grid">
+                <article class="slot-card">
+                  <div class="slot-head">
+                    <span class="pill">간식</span>
+                    <strong id="selected-treat-name">선택 전</strong>
+                  </div>
+                  <label>
+                    오늘 먹인 개수
+                    <input id="treat-count" type="number" min="0" step="1" placeholder="예: 3" />
+                  </label>
+                  <details>
+                    <summary>간식 고급 보정</summary>
+                    <div class="form-grid compact-grid">
+                      <label>
+                        총칼로리(kcal)
+                        <input id="treat-total-kcal" type="number" min="0" step="0.01" />
+                      </label>
+                      <label>
+                        총 알 수
+                        <input id="treat-piece-count" type="number" min="0" step="1" />
+                      </label>
+                    </div>
+                  </details>
+                </article>
+
+                <article class="slot-card">
+                  <div class="slot-head">
+                    <span class="pill">사료</span>
+                    <strong id="selected-food-name">선택 전</strong>
+                  </div>
+                  <label>
+                    오늘 먹인 양(g)
+                    <input id="food-grams" type="number" min="0" step="0.1" placeholder="예: 85" />
+                  </label>
+                  <details>
+                    <summary>사료 고급 보정</summary>
+                    <div class="form-grid compact-grid">
+                      <label>
+                        100g당 칼로리(kcal)
+                        <input id="food-kcal-per-100g" type="number" min="0" step="0.01" />
+                      </label>
+                    </div>
+                  </details>
+                </article>
+              </div>
+
+              <div class="actions">
+                <button id="calculate-button" type="button">하루 칼로리 계산</button>
+                <button id="reset-button" type="button" class="ghost">오늘 입력 초기화</button>
+              </div>
+
+              <div class="summary">
+                <article class="summary-card">
+                  <span>간식 칼로리</span>
+                  <strong id="treat-kcal-output">-</strong>
+                </article>
+                <article class="summary-card">
+                  <span>사료 칼로리</span>
+                  <strong id="food-kcal-output">-</strong>
+                </article>
+                <article class="summary-card">
+                  <span>권장 하루 칼로리</span>
+                  <strong id="recommended-output">-</strong>
+                </article>
+                <article class="summary-card highlight">
+                  <span>하루 총칼로리</span>
+                  <strong id="daily-total-output">-</strong>
+                </article>
+              </div>
+
+              <div class="summary comparison-summary">
+                <article class="summary-card">
+                  <span>간식 1개 기준</span>
+                  <strong id="kcal-per-piece-output">-</strong>
+                </article>
+                <article class="summary-card">
+                  <span>휴식 에너지(RER)</span>
+                  <strong id="rer-output">-</strong>
+                </article>
+                <article class="summary-card highlight">
+                  <span>현재 급여와 비교</span>
+                  <strong id="comparison-output">-</strong>
+                </article>
+              </div>
+
+              <div id="calculation-note" class="status muted">
+                프로필 저장 후 제품을 검색해서 간식이나 사료 칸에 넣어 주세요.
+              </div>
+            </section>
+          </section>
+
+          <section class="panel history-panel">
+            <div class="section-head">
+              <h2>4. 하루 급여 기록</h2>
+              <p>오늘 계산한 결과를 저장하고 최근 기록을 확인할 수 있어요.</p>
+            </div>
+
+            <div class="actions">
+              <button id="save-log-button" type="button">오늘 기록 저장</button>
+              <button id="refresh-log-button" type="button" class="ghost">기록 새로고침</button>
+            </div>
+
+            <div id="log-status" class="status muted">
+              계산 후 저장하면 최근 기록이 여기에 표시됩니다.
+            </div>
+
+            <div id="history-list" class="history-list"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

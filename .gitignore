@@ -1,0 +1,10 @@
+.env
+.venv/
+.pycache/
+__pycache__/
+output/
+reports/
+data/
+logs/
+.cache/
+site/
