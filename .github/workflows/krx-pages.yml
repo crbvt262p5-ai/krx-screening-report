@@ -60,10 +60,14 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Send Telegram notification
-        if: ${{ secrets.KRX_TELEGRAM_BOT_TOKEN != '' && secrets.KRX_TELEGRAM_CHAT_ID != '' }}
         env:
           KRX_SCREEN_BASE_DIR: ${{ github.workspace }}
           KRX_TELEGRAM_BOT_TOKEN: ${{ secrets.KRX_TELEGRAM_BOT_TOKEN }}
           KRX_TELEGRAM_CHAT_ID: ${{ secrets.KRX_TELEGRAM_CHAT_ID }}
           KRX_REPORT_PUBLIC_URL: ${{ steps.deployment.outputs.page_url }}
-        run: python scripts/send_krx_telegram.py
+        run: |
+          if [ -z "$KRX_TELEGRAM_BOT_TOKEN" ] || [ -z "$KRX_TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+          python scripts/send_krx_telegram.py
