@@ -147,6 +147,10 @@ class FinanceEnricher:
             equity.per = snapshot.get("per")
         if equity.dividend_yield is None:
             equity.dividend_yield = snapshot.get("dividend_yield")
+            if equity.dividend_yield is not None:
+                equity.dividend_yield_trailing = equity.dividend_yield
+                equity.dividend_yield_normalized = equity.dividend_yield
+                equity.dividend_yield_source = "fnguide_snapshot"
         if equity.pbr is None:
             equity.pbr = snapshot.get("pbr")
         if equity.close is not None:
@@ -188,10 +192,20 @@ class FinanceEnricher:
 
         if equity.dividend_yield is None:
             equity.dividend_yield = ratio_block.get("dividend_yield")
+            if equity.dividend_yield is not None:
+                equity.dividend_yield_trailing = equity.dividend_yield
+                equity.dividend_yield_normalized = equity.dividend_yield
+                equity.dividend_yield_source = "fnguide_ratio_block"
         if equity.per is None:
             equity.per = ratio_block.get("per")
         if equity.pbr is None:
             equity.pbr = ratio_block.get("pbr")
+
+        classification = _parse_business_classification(soup)
+        if equity.sector is None:
+            equity.sector = classification.get("sector")
+        if equity.industry is None:
+            equity.industry = classification.get("industry")
         equity.source_notes.append("fnguide:main")
 
     def _apply_historical_cache(self, equity: EquitySnapshot) -> None:
@@ -217,6 +231,10 @@ class FinanceEnricher:
                 value = _parse_amount(cached.get(csv_field))
                 if value is not None:
                     setattr(equity, attr, value)
+                    if attr == "dividend_yield" and equity.dividend_yield_source is None:
+                        equity.dividend_yield_trailing = value
+                        equity.dividend_yield_normalized = value
+                        equity.dividend_yield_source = "historical_csv"
                     applied = True
 
         list_fields = {
@@ -232,6 +250,17 @@ class FinanceEnricher:
                 if values:
                     setattr(equity, attr, values)
                     applied = True
+
+        for csv_field, attr in (("sector", "sector"), ("industry", "industry"), ("size_bucket", "size_bucket")):
+            current = getattr(equity, attr)
+            if not current:
+                text = str(cached.get(csv_field) or "").strip()
+                if text and text.lower() != "nan":
+                    if attr in {"sector", "industry"}:
+                        text = _clean_business_label(text) or ""
+                    if text:
+                        setattr(equity, attr, text)
+                        applied = True
 
         if applied:
             equity.source_notes.append("cache:historical_csv")
@@ -291,6 +320,8 @@ class FinanceEnricher:
             return pd.read_html(io.StringIO(html))
 
     def _finalize_derived_metrics(self, equity: EquitySnapshot) -> None:
+        equity.sector = _clean_business_label(equity.sector) if equity.sector else None
+        equity.industry = _clean_business_label(equity.industry) if equity.industry else None
         if equity.sales_3y and len(equity.sales_3y) < 3:
             equity.mark_missing("sales_3y")
         if equity.op_income_3y and len(equity.op_income_3y) < 3:
@@ -317,6 +348,8 @@ class FinanceEnricher:
         else:
             equity.clear_missing("dividends_3y")
 
+        self._reconcile_dividend_yield(equity)
+
         if equity.op_income_3y and len(equity.op_income_3y) >= 2:
             series = pd.Series([v for v in equity.op_income_3y if v is not None and v != 0])
             if len(series) >= 2:
@@ -325,6 +358,54 @@ class FinanceEnricher:
             equity.mark_missing("op_income_volatility")
         else:
             equity.clear_missing("op_income_volatility")
+        if equity.market_cap is not None:
+            equity.size_bucket = _classify_size_bucket(equity.market_cap)
+
+    def _reconcile_dividend_yield(self, equity: EquitySnapshot) -> None:
+        non_zero_dividends = [value for value in equity.dividends_3y if value not in (None, 0)]
+        trailing_dps = non_zero_dividends[-1] if non_zero_dividends else None
+        normalized_dps = _normalized_dividend_dps(non_zero_dividends)
+
+        computed_trailing = None
+        computed_normalized = None
+        if equity.close not in (None, 0):
+            if trailing_dps is not None:
+                computed_trailing = round((trailing_dps / equity.close) * 100, 2)
+            if normalized_dps is not None:
+                computed_normalized = round((normalized_dps / equity.close) * 100, 2)
+
+        existing = equity.dividend_yield
+        if computed_trailing is not None:
+            if existing is None or _yield_mismatch(existing, computed_trailing):
+                equity.dividend_yield = computed_trailing
+                equity.source_notes.append("dividend_yield:reconciled")
+            equity.dividend_yield_trailing = computed_trailing
+        elif existing is not None and equity.dividend_yield_trailing is None:
+            equity.dividend_yield_trailing = existing
+
+        if computed_normalized is not None:
+            equity.dividend_yield_normalized = computed_normalized
+        elif existing is not None and equity.dividend_yield_normalized is None:
+            equity.dividend_yield_normalized = existing
+
+        if (
+            equity.dividend_yield_trailing is not None
+            and equity.dividend_yield_normalized is not None
+            and equity.dividend_yield_trailing >= equity.dividend_yield_normalized * 1.8
+            and "특별배당 가능성" not in equity.tags
+        ):
+            equity.tags.append("특별배당 가능성")
+
+        if (
+            equity.dividend_yield_source is None
+            and (equity.dividend_yield_trailing is not None or equity.dividend_yield_normalized is not None)
+        ):
+            equity.dividend_yield_source = "reported"
+
+        if equity.dividend_yield_trailing is not None or equity.dividend_yield_normalized is not None:
+            equity.clear_missing("dividend_yield")
+        else:
+            equity.mark_missing("dividend_yield")
 
     def _get_corp_code(self, ticker: str) -> str | None:
         if self._corp_code_map is None:
@@ -574,6 +655,109 @@ def _extract_label_value(text: str, label: str) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def _parse_business_classification(soup: BeautifulSoup) -> dict[str, str | None]:
+    text = soup.get_text(" ", strip=True)
+    sector = None
+    industry = None
+
+    pattern = re.search(
+        r"(KOSPI|KOSDAQ|KSE|코스피|코스닥)\s+([가-힣A-Za-z0-9&\-/ ]+?)\s*\|\s*FICS\s+([가-힣A-Za-z0-9&\-/ ]+)",
+        text,
+    )
+    if pattern:
+        sector = _clean_business_label(pattern.group(2))
+        industry = _clean_business_label(pattern.group(3))
+
+    if sector is None:
+        sector = _extract_label_text(text, "업종")
+    if industry is None:
+        industry = _extract_label_text(text, "FICS")
+
+    return {
+        "sector": sector,
+        "industry": industry,
+    }
+
+
+def _extract_label_text(text: str, label: str) -> str | None:
+    match = re.search(
+        rf"{re.escape(label)}\s*[:：]?\s*([가-힣A-Za-z0-9&\-/ ]{{2,40}})",
+        text,
+    )
+    if not match:
+        return None
+    return _clean_business_label(match.group(1))
+
+
+def _clean_business_label(value: str) -> str | None:
+    text = str(value).strip(" |")
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"(주가추이|시세현황|외국인지분율).*$", "", text).strip()
+    banned_tokens = (
+        "분석",
+        "경쟁사비교",
+        "거래소공시",
+        "금감원공시",
+        "ETF",
+        "ETN",
+        "Snap",
+        "News",
+        "리포트",
+        "실적속보",
+        "컨센서스",
+        "목표주가",
+        "View",
+    )
+    if any(token.lower() in text.lower() for token in banned_tokens):
+        return None
+    text = re.sub(r"^(코스피|코스닥|KOSPI|KOSDAQ)\s+", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s+(코스피|코스닥|KOSPI|KOSDAQ)\s+", " ", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\b(FICS|WICS)\b.*$", "", text, flags=re.IGNORECASE).strip(" |")
+    parts = [part for part in text.split() if part]
+    if len(parts) >= 2 and parts[: len(parts) // 2] == parts[len(parts) // 2 :]:
+        text = " ".join(parts[: len(parts) // 2])
+    if not text:
+        return None
+    if len(text) > 24:
+        return None
+    allowed_keywords = (
+        "금융",
+        "보험",
+        "증권",
+        "은행",
+        "건설",
+        "화학",
+        "기계",
+        "유통",
+        "금속",
+        "반도체",
+        "통신",
+        "자동차",
+        "운송",
+        "서비스",
+        "전기",
+        "전자",
+        "철강",
+        "조선",
+        "음식료",
+        "바이오",
+        "제약",
+        "게임",
+        "콘텐츠",
+        "엔터",
+        "미디어",
+        "리츠",
+        "소프트웨어",
+        "인터넷",
+        "헬스케어",
+        "화장품",
+        "교육",
+    )
+    if not any(keyword in text for keyword in allowed_keywords):
+        return None
+    return text.strip()
+
+
 def _parse_metric_row(
     frame: pd.DataFrame, metric_names: list[str], columns: list[str]
 ) -> list[float | None]:
@@ -684,3 +868,31 @@ def _first_value(lookup: dict[str, float | None], keys: list[str]) -> float | No
         if key in lookup and lookup[key] is not None:
             return lookup[key]
     return None
+
+
+def _classify_size_bucket(market_cap: float | None) -> str | None:
+    if market_cap is None:
+        return None
+    if market_cap >= 10_000_000_000_000:
+        return "Mega"
+    if market_cap >= 2_000_000_000_000:
+        return "Large"
+    if market_cap >= 300_000_000_000:
+        return "Mid"
+    return "Small"
+
+
+def _normalized_dividend_dps(dividends: list[float]) -> float | None:
+    if not dividends:
+        return None
+    ordered = sorted(dividends)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return round((ordered[mid - 1] + ordered[mid]) / 2, 2)
+
+
+def _yield_mismatch(existing: float, computed: float) -> bool:
+    gap = abs(existing - computed)
+    ratio_gap = gap / max(computed, 0.1)
+    return gap >= 2.0 and ratio_gap >= 0.35

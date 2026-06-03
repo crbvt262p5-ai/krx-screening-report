@@ -52,14 +52,21 @@ def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataB
         cap_row = _safe_row(cap_frames.get(snapshot.market), snapshot.ticker)
         fund_row = _safe_row(fundamental_frames.get(snapshot.market), snapshot.ticker)
         listing_detail = listing_details.get(snapshot.ticker, {})
+        snapshot.sector = _coerce_text(listing_detail.get("sector"))
+        snapshot.industry = _coerce_text(listing_detail.get("industry"))
 
         snapshot.close = _coerce_float(price_row.get("종가")) or _coerce_float(listing_detail.get("close"))
         snapshot.market_cap = _coerce_float(cap_row.get("시가총액")) or _coerce_float(
             listing_detail.get("market_cap")
         )
+        snapshot.size_bucket = _classify_size_bucket(snapshot.market_cap)
         snapshot.per = _coerce_float(fund_row.get("PER"))
         snapshot.pbr = _coerce_float(fund_row.get("PBR"))
         snapshot.dividend_yield = _coerce_float(fund_row.get("DIV"))
+        if snapshot.dividend_yield is not None:
+            snapshot.dividend_yield_trailing = snapshot.dividend_yield
+            snapshot.dividend_yield_normalized = snapshot.dividend_yield
+            snapshot.dividend_yield_source = "pykrx_snapshot"
 
         if snapshot.close is None:
             snapshot.mark_missing("prev_close")
@@ -155,6 +162,8 @@ def _load_market_listing(
             str(row.Code).zfill(6): {
                 "close": _coerce_float(getattr(row, "Close", None)),
                 "market_cap": _coerce_float(getattr(row, "Marcap", None)),
+                "sector": _first_present_text(row, "Sector", "업종", "WICS업종명"),
+                "industry": _first_present_text(row, "Industry", "산업", "업종소"),
             }
             for row in listing.itertuples()
         }
@@ -260,3 +269,31 @@ def _coerce_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_text(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _first_present_text(row: object, *names: str) -> str | None:
+    for name in names:
+        value = getattr(row, name, None)
+        text = _coerce_text(value)
+        if text:
+            return text
+    return None
+
+
+def _classify_size_bucket(market_cap: float | None) -> str | None:
+    if market_cap is None:
+        return None
+    if market_cap >= 10_000_000_000_000:
+        return "Mega"
+    if market_cap >= 2_000_000_000_000:
+        return "Large"
+    if market_cap >= 300_000_000_000:
+        return "Mid"
+    return "Small"

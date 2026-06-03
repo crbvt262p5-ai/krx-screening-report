@@ -26,8 +26,8 @@ def write_outputs(settings: Settings, trading_date: date, equities: list[EquityS
     frame.to_csv(csv_path, index=False, encoding="utf-8-sig")
     frame.to_csv(latest_csv_path, index=False, encoding="utf-8-sig")
 
-    markdown = _build_markdown(trading_date, equities, frame)
-    html = _build_html(trading_date, equities, frame)
+    markdown = _build_markdown(settings, trading_date, equities, frame)
+    html = _build_html(settings, trading_date, equities, frame)
     with md_path.open("w", encoding="utf-8") as handle:
         handle.write(markdown)
     with latest_md_path.open("w", encoding="utf-8") as handle:
@@ -40,9 +40,35 @@ def write_outputs(settings: Settings, trading_date: date, equities: list[EquityS
     return str(md_path), str(csv_path)
 
 
-def _build_markdown(trading_date: date, equities: list[EquitySnapshot], frame: pd.DataFrame) -> str:
+def _build_markdown(
+    settings: Settings,
+    trading_date: date,
+    equities: list[EquitySnapshot],
+    frame: pd.DataFrame,
+) -> str:
     working = _normalize_frame(frame)
+    history = _load_recent_top_counts(settings, trading_date)
     summary = _summary_metrics(equities, working)
+    value_top = _select_featured_rows(
+        working[~working["excluded"]],
+        score_column="value_score",
+        history_counts=history["value"],
+        weekly_counts=history["value_weekly"],
+        limit=20,
+    )
+    growth_top = _select_featured_rows(
+        working,
+        score_column="growth_early_score",
+        history_counts=history["growth"],
+        weekly_counts=history["growth_weekly"],
+        limit=20,
+    )
+    deep_value = _style_slice(value_top, "value_style", "Deep Value", 5)
+    dividend_compounder = _style_slice(value_top, "value_style", "Dividend Compounder", 5)
+    turnaround_value = _style_slice(value_top, "value_style", "Turnaround Value", 5)
+    growth_proven = _style_slice(growth_top, "growth_style", "Growth Proven", 5)
+    growth_speculative = _style_slice(growth_top, "growth_style", "Growth Speculative", 5)
+    special_dividend_watch = _special_dividend_watchlist(working, limit=12)
 
     parts = [
         f"# KRX Daily Screening Report ({trading_date.isoformat()})",
@@ -58,31 +84,82 @@ def _build_markdown(trading_date: date, equities: list[EquitySnapshot], frame: p
         "",
         "## Quick Picks",
         "### Value Top 10",
-        _bullet_summary(working[~working["excluded"]].nlargest(20, "value_score").head(10), score_column="value_score"),
+        _bullet_summary(value_top.head(10), score_column="value_score"),
         "",
         "### Growth Top 10",
-        _bullet_summary(working.nlargest(20, "growth_early_score").head(10), score_column="growth_early_score"),
+        _bullet_summary(growth_top.head(10), score_column="growth_early_score"),
+        "",
+        "## Value Lenses",
+        "### Deep Value",
+        _bullet_summary(deep_value, score_column="value_score"),
+        "",
+        "### Dividend Compounder",
+        _bullet_summary(dividend_compounder, score_column="value_score"),
+        "",
+        "### Turnaround Value",
+        _bullet_summary(turnaround_value, score_column="value_score"),
+        "",
+        "## Growth Lenses",
+        "### Growth Proven",
+        _bullet_summary(growth_proven, score_column="growth_early_score"),
+        "",
+        "### Growth Speculative",
+        _bullet_summary(growth_speculative, score_column="growth_early_score"),
         "",
         "## Top Value Bucket",
-        _table_for_markdown(working[~working["excluded"]].nlargest(20, "value_score"), bucket="value"),
+        _table_for_markdown(value_top, bucket="value"),
         "",
         "## Top Growth Early Bucket",
-        _table_for_markdown(working.nlargest(20, "growth_early_score"), bucket="growth"),
+        _table_for_markdown(growth_top, bucket="growth"),
+        "",
+        "## Special Dividend Watch",
+        _table_for_markdown(special_dividend_watch, bucket="special_dividend"),
         "",
         "## Notes",
         "- `excluded=true` 는 최근 급등 규칙 때문에 밸류 버킷에서 제외된 종목입니다.",
         "- `missing_data` 는 소스 부재 시 자동으로 붙는 플래그이며 파이프라인은 중단되지 않습니다.",
         "- `Core missing fields` 는 가격/시총/PER/PBR/배당/3개년 실적처럼 핵심 판단 항목 기준입니다.",
+        "- 상단 추천은 최근 반복 노출, 업종 쏠림, 시총 쏠림을 완화한 `다변화 뷰` 기준입니다.",
+        "- `Special Dividend Watch` 는 최근 실제 배당수익률이 평년화 배당수익률보다 과도하게 높아 착시 가능성이 있는 종목입니다.",
     ]
     return "\n".join(parts)
 
 
-def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.DataFrame) -> str:
+def _build_html(
+    settings: Settings,
+    trading_date: date,
+    equities: list[EquitySnapshot],
+    frame: pd.DataFrame,
+) -> str:
     working = _normalize_frame(frame)
+    history = _load_recent_top_counts(settings, trading_date)
     summary = _summary_metrics(equities, working)
-    value_top = working[~working["excluded"]].nlargest(20, "value_score")
-    growth_top = working.nlargest(20, "growth_early_score")
-    full_list = working[~working["excluded"]].nlargest(200, "value_score")
+    value_top = _select_featured_rows(
+        working[~working["excluded"]],
+        score_column="value_score",
+        history_counts=history["value"],
+        weekly_counts=history["value_weekly"],
+        limit=20,
+    )
+    growth_top = _select_featured_rows(
+        working,
+        score_column="growth_early_score",
+        history_counts=history["growth"],
+        weekly_counts=history["growth_weekly"],
+        limit=20,
+    )
+    deep_value = _style_slice(value_top, "value_style", "Deep Value", 4)
+    dividend_compounder = _style_slice(value_top, "value_style", "Dividend Compounder", 4)
+    turnaround_value = _style_slice(value_top, "value_style", "Turnaround Value", 4)
+    growth_proven = _style_slice(growth_top, "growth_style", "Growth Proven", 4)
+    growth_speculative = _style_slice(growth_top, "growth_style", "Growth Speculative", 4)
+    special_dividend_watch = _special_dividend_watchlist(working, limit=12)
+    full_list = _rank_for_explorer(
+        working[~working["excluded"]],
+        score_column="value_score",
+        history_counts=history["value"],
+        weekly_counts=history["value_weekly"],
+    ).head(200)
 
     summary_cards = [
         ("전체 스캔 종목", f"{summary['total']:,}"),
@@ -96,6 +173,12 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
     missing_counts = _top_missing_counts(working)
     quick_value = _card_grid(value_top.head(8), "value_score", accent="value")
     quick_growth = _card_grid(growth_top.head(8), "growth_early_score", accent="growth")
+    deep_value_html = _card_grid(deep_value, "value_score", accent="value")
+    dividend_compounder_html = _card_grid(dividend_compounder, "value_score", accent="value")
+    turnaround_value_html = _card_grid(turnaround_value, "value_score", accent="value")
+    growth_proven_html = _card_grid(growth_proven, "growth_early_score", accent="growth")
+    growth_speculative_html = _card_grid(growth_speculative, "growth_early_score", accent="growth")
+    special_watch_html = _html_table(special_dividend_watch, bucket="special_dividend")
     universe_json = json.dumps(_records_for_ui(full_list), ensure_ascii=False)
     value_table = _html_table(value_top, bucket="value")
     growth_table = _html_table(growth_top, bucket="growth")
@@ -374,7 +457,7 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
     <section class="section">
       <div class="section-head">
         <h2>Value Quick Picks</h2>
-        <span>낮은 밸류와 현금성, 배당, 이익 안정성 중심</span>
+        <span>낮은 밸류와 현금성, 배당, 이익 안정성 중심의 다변화 추천</span>
       </div>
       <div class="card-grid">{quick_value}</div>
     </section>
@@ -382,9 +465,48 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
     <section class="section">
       <div class="section-head">
         <h2>Growth Early Quick Picks</h2>
-        <span>내년 성장률과 업황 시그널 중심</span>
+        <span>내년 성장률과 업황 시그널 중심의 다변화 추천</span>
       </div>
       <div class="card-grid">{quick_growth}</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Value Lenses</h2>
+        <span>저평가, 배당복리, 턴어라운드를 분리해서 봅니다.</span>
+      </div>
+      <div class="section-head">
+        <h2>Deep Value</h2>
+        <span>낮은 PER/PBR 중심</span>
+      </div>
+      <div class="card-grid">{deep_value_html}</div>
+      <div class="section-head">
+        <h2>Dividend Compounder</h2>
+        <span>배당 반복성과 현금흐름 중심</span>
+      </div>
+      <div class="card-grid">{dividend_compounder_html}</div>
+      <div class="section-head">
+        <h2>Turnaround Value</h2>
+        <span>실적 회복 초기 저평가</span>
+      </div>
+      <div class="card-grid">{turnaround_value_html}</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Growth Lenses</h2>
+        <span>검증형 성장과 투기형 초기 성장을 분리합니다.</span>
+      </div>
+      <div class="section-head">
+        <h2>Growth Proven</h2>
+        <span>흑자/성장 검증형</span>
+      </div>
+      <div class="card-grid">{growth_proven_html}</div>
+      <div class="section-head">
+        <h2>Growth Speculative</h2>
+        <span>적자 포함 초기 성장형</span>
+      </div>
+      <div class="card-grid">{growth_speculative_html}</div>
     </section>
 
     <section class="section">
@@ -405,8 +527,16 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
 
     <section class="section">
       <div class="section-head">
+        <h2>Special Dividend Watch</h2>
+        <span>최근 실제 배당이 높아 보여도 평년 배당력은 낮을 수 있는 종목입니다.</span>
+      </div>
+      <div class="table-wrap">{special_watch_html}</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
         <h2>Candidate Explorer</h2>
-        <span>상위 200개 비제외 종목을 검색/필터링할 수 있습니다.</span>
+        <span>상위 200개 비제외 종목을 검색/필터링할 수 있습니다. 최근 반복 노출 횟수도 함께 봅니다.</span>
       </div>
       <div class="controls">
         <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
@@ -429,13 +559,19 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
             <tr>
               <th>종목</th>
               <th>시장</th>
+              <th>업종</th>
+              <th>시총구간</th>
               <th>전일 종가</th>
-              <th>PER</th>
-              <th>PBR</th>
-              <th>배당</th>
-              <th>6M</th>
+          <th>PER</th>
+          <th>PBR</th>
+          <th>배당 T</th>
+              <th>배당 N</th>
+          <th>6M</th>
               <th>Value</th>
+              <th>Value Style</th>
               <th>Growth</th>
+              <th>Growth Style</th>
+              <th>최근반복</th>
               <th>Stage</th>
               <th>태그</th>
               <th>결측</th>
@@ -477,13 +613,19 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
         <tr>
           <td><strong>${{row.name}}</strong><div class="subtle">${{row.ticker}}</div></td>
           <td>${{row.market || "-"}}</td>
+          <td>${{row.sector || "-"}}</td>
+          <td>${{row.size_bucket || "-"}}</td>
           <td>${{fmt(row.prev_close)}}</td>
           <td>${{fmt(row.per)}}</td>
           <td>${{fmt(row.pbr)}}</td>
-          <td>${{fmt(row.dividend_yield, "%")}}</td>
+          <td>${{fmt(row.dividend_yield_trailing, "%")}}</td>
+          <td>${{fmt(row.dividend_yield_normalized, "%")}}</td>
           <td>${{fmt(row.returns_6m_pct, "%")}}</td>
           <td>${{fmt(row.value_score)}}</td>
+          <td>${{row.value_style || "-"}}</td>
           <td>${{fmt(row.growth_early_score)}}</td>
+          <td>${{row.growth_style || "-"}}</td>
+          <td>${{fmt(row.repeat_top_count)}}</td>
           <td>${{stageBadge(row.stage)}}</td>
           <td>${{row.tags || "-"}}</td>
           <td>${{row.missing_data || "-"}}</td>
@@ -502,12 +644,31 @@ def _build_html(trading_date: date, equities: list[EquitySnapshot], frame: pd.Da
 
 def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     working = frame.copy()
+    for column, default in (
+        ("sector", ""),
+        ("industry", ""),
+        ("size_bucket", ""),
+        ("dividend_yield_source", ""),
+        ("dividend_yield_trailing", ""),
+        ("dividend_yield_normalized", ""),
+        ("value_style", ""),
+        ("growth_style", ""),
+        ("repeat_top_count", 0),
+        ("source_notes", ""),
+        ("missing_data", ""),
+        ("tags", ""),
+    ):
+        if column not in working.columns:
+            working[column] = default
     for column in (
         "value_score",
         "growth_early_score",
         "dividend_potential_score",
         "returns_6m_pct",
         "high_52w_ratio_pct",
+        "repeat_top_count",
+        "dividend_yield_trailing",
+        "dividend_yield_normalized",
     ):
         if column in working.columns:
             working[column] = pd.to_numeric(working[column], errors="coerce")
@@ -555,6 +716,135 @@ def _top_missing_counts(working: pd.DataFrame) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)[:8]
 
 
+def _load_recent_top_counts(settings: Settings, trading_date: date) -> dict[str, dict[str, int]]:
+    value_counts: dict[str, int] = {}
+    growth_counts: dict[str, int] = {}
+    value_weekly_counts: dict[str, int] = {}
+    growth_weekly_counts: dict[str, int] = {}
+    history_files = sorted(settings.data_dir.glob("screened_*.csv"), reverse=True)
+    processed = 0
+    for path in history_files:
+        if path.name == f"screened_{trading_date.isoformat()}.csv":
+            continue
+        try:
+            frame = pd.read_csv(path)
+        except Exception:
+            continue
+        working = _normalize_frame(frame)
+        value_top = working[~working["excluded"]].nlargest(20, "value_score")["ticker"].astype(str).tolist()
+        growth_top = working.nlargest(20, "growth_early_score")["ticker"].astype(str).tolist()
+        for ticker in value_top:
+            value_counts[ticker] = value_counts.get(ticker, 0) + 1
+        for ticker in growth_top:
+            growth_counts[ticker] = growth_counts.get(ticker, 0) + 1
+        if processed < 5:
+            for ticker in value_top:
+                value_weekly_counts[ticker] = value_weekly_counts.get(ticker, 0) + 1
+            for ticker in growth_top:
+                growth_weekly_counts[ticker] = growth_weekly_counts.get(ticker, 0) + 1
+        processed += 1
+        if processed >= 10:
+            break
+    return {
+        "value": value_counts,
+        "growth": growth_counts,
+        "value_weekly": value_weekly_counts,
+        "growth_weekly": growth_weekly_counts,
+    }
+
+
+def _rank_for_explorer(
+    frame: pd.DataFrame,
+    score_column: str,
+    history_counts: dict[str, int],
+    weekly_counts: dict[str, int] | None = None,
+) -> pd.DataFrame:
+    working = frame.copy()
+    core_fields = {"per", "pbr", "dividend_yield", "sales_3y", "op_income_3y", "net_income_3y"}
+    repeat_counts: list[int] = []
+    adjusted_scores: list[float] = []
+    for row in working.itertuples(index=False):
+        ticker = str(getattr(row, "ticker", ""))
+        repeat_count = history_counts.get(ticker, 0)
+        weekly_repeat = (weekly_counts or {}).get(ticker, 0)
+        repeat_counts.append(repeat_count)
+        base_score = getattr(row, score_column, None)
+        if pd.isna(base_score):
+            base_score = 0.0
+        stage_bonus = {"초입": 0.8, "중간": 0.4, "후반": -0.15, "과열": -0.9}.get(
+            str(getattr(row, "stage", "") or ""),
+            0.0,
+        )
+        missing_count = len(
+            [item for item in str(getattr(row, "missing_data", "") or "").split("|") if item in core_fields]
+        )
+        data_penalty = missing_count * 0.25
+        repeat_penalty = min(3.0, repeat_count * 0.55)
+        weekly_penalty = min(2.0, weekly_repeat * 0.45)
+        adjusted_scores.append(float(base_score) + stage_bonus - data_penalty - repeat_penalty - weekly_penalty)
+    working["repeat_top_count"] = repeat_counts
+    working["display_score"] = adjusted_scores
+    return working.sort_values(
+        by=["display_score", score_column, "dividend_potential_score"],
+        ascending=False,
+    )
+
+
+def _select_featured_rows(
+    frame: pd.DataFrame,
+    score_column: str,
+    history_counts: dict[str, int],
+    weekly_counts: dict[str, int] | None,
+    limit: int,
+) -> pd.DataFrame:
+    ranked = _rank_for_explorer(
+        frame,
+        score_column=score_column,
+        history_counts=history_counts,
+        weekly_counts=weekly_counts,
+    )
+    if ranked.empty:
+        return ranked
+
+    picks: list[int] = []
+    sector_counts: dict[str, int] = {}
+    size_counts: dict[str, int] = {}
+    phases = (
+        (2, 3),
+        (3, 4),
+        (10_000, 10_000),
+    )
+
+    for sector_cap, size_cap in phases:
+        for idx, row in ranked.iterrows():
+            if idx in picks:
+                continue
+            sector = str(row.get("sector") or "").strip()
+            size_bucket = str(row.get("size_bucket") or "").strip()
+            if sector and sector_counts.get(sector, 0) >= sector_cap:
+                continue
+            if size_bucket and size_counts.get(size_bucket, 0) >= size_cap:
+                continue
+            picks.append(idx)
+            if sector:
+                sector_counts[sector] = sector_counts.get(sector, 0) + 1
+            if size_bucket:
+                size_counts[size_bucket] = size_counts.get(size_bucket, 0) + 1
+            if len(picks) >= limit:
+                break
+        if len(picks) >= limit:
+            break
+
+    return ranked.loc[picks].reset_index(drop=True)
+
+
+def _style_slice(frame: pd.DataFrame, column: str, target: str, limit: int) -> pd.DataFrame:
+    if column not in frame.columns:
+        return frame.head(0)
+    filtered = frame[frame[column].fillna("") == target]
+    return filtered.head(limit)
+
+
 def _table_for_markdown(frame: pd.DataFrame, bucket: str) -> str:
     if frame.empty:
         return "_No rows_"
@@ -563,10 +853,13 @@ def _table_for_markdown(frame: pd.DataFrame, bucket: str) -> str:
         columns = [
             "ticker",
             "name",
+            "sector",
+            "size_bucket",
             "prev_close",
             "per",
             "pbr",
-            "dividend_yield",
+            "dividend_yield_trailing",
+            "dividend_yield_normalized",
             "returns_6m_pct",
             "value_score",
             "dividend_potential_score",
@@ -574,10 +867,24 @@ def _table_for_markdown(frame: pd.DataFrame, bucket: str) -> str:
             "tags",
             "missing_data",
         ]
+    elif bucket == "special_dividend":
+        columns = [
+            "ticker",
+            "name",
+            "sector",
+            "prev_close",
+            "dividend_yield_trailing",
+            "dividend_yield_normalized",
+            "dividend_gap_pct",
+            "dividends_3y",
+            "tags",
+        ]
     else:
         columns = [
             "ticker",
             "name",
+            "sector",
+            "size_bucket",
             "prev_close",
             "per",
             "pbr",
@@ -603,11 +910,13 @@ def _bullet_summary(frame: pd.DataFrame, score_column: str) -> str:
         returns_6m = getattr(row, "returns_6m_pct", None)
         stage = getattr(row, "stage", "")
         tags = getattr(row, "tags", "")
+        sector = getattr(row, "sector", "") or getattr(row, "market", "")
+        size_bucket = getattr(row, "size_bucket", "")
         score_text = f"{score:.1f}" if pd.notna(score) else "-"
         returns_text = f"{returns_6m:.1f}%" if pd.notna(returns_6m) else "-"
         tag_text = f" / {tags}" if tags else ""
         lines.append(
-            f"- {row.name} ({row.ticker}) score {score_text}, 6M {returns_text}, stage {stage}{tag_text}"
+            f"- {row.name} ({row.ticker}) [{sector} {size_bucket}] score {score_text}, 6M {returns_text}, stage {stage}{tag_text}"
         )
     return "\n".join(lines)
 
@@ -618,7 +927,11 @@ def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
         score = getattr(row, score_column)
         score_text = f"{score:.1f}" if pd.notna(score) else "-"
         returns_text = f"{getattr(row, 'returns_6m_pct', float('nan')):.1f}%" if pd.notna(getattr(row, "returns_6m_pct", None)) else "-"
-        div_text = f"{getattr(row, 'dividend_yield', float('nan')):.2f}%" if pd.notna(getattr(row, "dividend_yield", None)) else "-"
+        trailing = getattr(row, "dividend_yield_trailing", None)
+        normalized = getattr(row, "dividend_yield_normalized", None)
+        trailing_text = f"{trailing:.2f}%" if pd.notna(trailing) else "-"
+        normalized_text = f"{normalized:.2f}%" if pd.notna(normalized) else "-"
+        div_text = f"{trailing_text} / {normalized_text}"
         cards.append(
             f"""
             <article class="pick-card {accent}">
@@ -626,10 +939,12 @@ def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
               <h3>{escape(str(row.name))}</h3>
               <span class="score-badge {accent}">score {escape(score_text)}</span>
               <div class="meta">
+                <div><strong>업종</strong><br>{escape(_fmt_cell(getattr(row, 'sector', None)))}</div>
+                <div><strong>시총구간</strong><br>{escape(_fmt_cell(getattr(row, 'size_bucket', None)))}</div>
                 <div><strong>PER</strong><br>{escape(_fmt_cell(getattr(row, 'per', None)))}</div>
                 <div><strong>PBR</strong><br>{escape(_fmt_cell(getattr(row, 'pbr', None)))}</div>
                 <div><strong>6M</strong><br>{escape(returns_text)}</div>
-                <div><strong>배당</strong><br>{escape(div_text)}</div>
+                <div><strong>배당 T/N</strong><br>{escape(div_text)}</div>
               </div>
               <div class="chip-row">
                 <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
@@ -646,9 +961,11 @@ def _html_table(frame: pd.DataFrame, bucket: str) -> str:
         return "<div class='subtle'>No rows</div>"
     rows: list[str] = []
     if bucket == "value":
-        columns = ["ticker", "name", "prev_close", "per", "pbr", "dividend_yield", "returns_6m_pct", "value_score", "dividend_potential_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "sector", "size_bucket", "prev_close", "per", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "value_score", "dividend_potential_score", "stage", "tags", "missing_data"]
+    elif bucket == "special_dividend":
+        columns = ["ticker", "name", "sector", "prev_close", "dividend_yield_trailing", "dividend_yield_normalized", "dividend_gap_pct", "dividends_3y", "tags"]
     else:
-        columns = ["ticker", "name", "prev_close", "per", "pbr", "returns_6m_pct", "high_52w_ratio_pct", "growth_early_score", "value_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "sector", "size_bucket", "prev_close", "per", "pbr", "returns_6m_pct", "high_52w_ratio_pct", "growth_early_score", "value_score", "stage", "tags", "missing_data"]
 
     for row in frame[columns].itertuples(index=False, name=None):
         rendered = []
@@ -668,18 +985,58 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "ticker",
         "market",
         "name",
+        "sector",
+        "size_bucket",
         "prev_close",
         "per",
         "pbr",
         "dividend_yield",
+        "dividend_yield_trailing",
+        "dividend_yield_normalized",
         "returns_6m_pct",
         "value_score",
         "growth_early_score",
+        "value_style",
+        "growth_style",
         "stage",
         "tags",
         "missing_data",
+        "repeat_top_count",
     ]
     return frame[columns].to_dict(orient="records")
+
+
+def _special_dividend_watchlist(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    working = frame.copy()
+    for column in ("dividend_yield_trailing", "dividend_yield_normalized"):
+        if column not in working.columns:
+            working[column] = pd.NA
+        working[column] = pd.to_numeric(working[column], errors="coerce")
+
+    working = working[
+        working["dividend_yield_trailing"].notna()
+        & working["dividend_yield_normalized"].notna()
+        & (working["dividend_yield_trailing"] >= 4)
+    ].copy()
+    if working.empty:
+        return working
+
+    working["dividend_gap_pct"] = (
+        working["dividend_yield_trailing"] - working["dividend_yield_normalized"]
+    ).round(2)
+    working = working[
+        (working["dividend_gap_pct"] >= 2.0)
+        | (
+            working["dividend_yield_trailing"]
+            >= working["dividend_yield_normalized"] * 1.8
+        )
+    ]
+    if working.empty:
+        return working
+    return working.sort_values(
+        by=["dividend_gap_pct", "dividend_yield_trailing"],
+        ascending=False,
+    ).head(limit)
 
 
 def _fmt_cell(value: object, key: str | None = None) -> str:

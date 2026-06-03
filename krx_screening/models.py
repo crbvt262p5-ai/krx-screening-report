@@ -9,11 +9,17 @@ class EquitySnapshot:
     ticker: str
     market: str
     name: str
+    sector: str | None = None
+    industry: str | None = None
+    size_bucket: str | None = None
     close: float | None = None
     market_cap: float | None = None
     per: float | None = None
     pbr: float | None = None
     dividend_yield: float | None = None
+    dividend_yield_trailing: float | None = None
+    dividend_yield_normalized: float | None = None
+    dividend_yield_source: str | None = None
     returns_1m: float | None = None
     returns_3m: float | None = None
     returns_6m: float | None = None
@@ -39,6 +45,8 @@ class EquitySnapshot:
     value_score: float = 0.0
     growth_early_score: float = 0.0
     dividend_potential_score: float = 0.0
+    value_style: str | None = None
+    growth_style: str | None = None
     stage: str = "초입"
     tags: list[str] = field(default_factory=list)
 
@@ -55,11 +63,17 @@ class EquitySnapshot:
             "ticker": self.ticker,
             "market": self.market,
             "name": self.name,
+            "sector": self.sector,
+            "industry": self.industry,
+            "size_bucket": self.size_bucket,
             "prev_close": self.close,
             "market_cap": self.market_cap,
             "per": self.per,
             "pbr": self.pbr,
             "dividend_yield": self.dividend_yield,
+            "dividend_yield_trailing": self.dividend_yield_trailing,
+            "dividend_yield_normalized": self.dividend_yield_normalized,
+            "dividend_yield_source": self.dividend_yield_source,
             "returns_1m_pct": self.returns_1m,
             "returns_3m_pct": self.returns_3m,
             "returns_6m_pct": self.returns_6m,
@@ -80,6 +94,8 @@ class EquitySnapshot:
             "value_score": self.value_score,
             "growth_early_score": self.growth_early_score,
             "dividend_potential_score": self.dividend_potential_score,
+            "value_style": self.value_style,
+            "growth_style": self.growth_style,
             "excluded": self.excluded,
             "reasons": " / ".join(self.exclusion_reasons or self.pass_reasons),
             "stage": self.stage,
