@@ -22,3 +22,4 @@ cd "$ROOT"
 export PYTHONPYCACHEPREFIX="$ROOT/.cache/python"
 export MPLCONFIGDIR="$ROOT/.cache/matplotlib"
 python3 -m krx_screening.main >> "$LOG_DIR/krx_screening_runner.log" 2>&1
+python3 scripts/verify_krx_outputs.py >> "$LOG_DIR/krx_screening_runner.log" 2>&1

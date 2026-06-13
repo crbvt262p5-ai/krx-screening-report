@@ -651,6 +651,9 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("dividend_yield_source", ""),
         ("dividend_yield_trailing", ""),
         ("dividend_yield_normalized", ""),
+        ("business_quality_score", 0),
+        ("liquidity_support_score", 0),
+        ("value_trap_risk_score", 0),
         ("value_style", ""),
         ("growth_style", ""),
         ("repeat_top_count", 0),
@@ -669,6 +672,9 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "repeat_top_count",
         "dividend_yield_trailing",
         "dividend_yield_normalized",
+        "business_quality_score",
+        "liquidity_support_score",
+        "value_trap_risk_score",
     ):
         if column in working.columns:
             working[column] = pd.to_numeric(working[column], errors="coerce")
@@ -863,6 +869,8 @@ def _table_for_markdown(frame: pd.DataFrame, bucket: str) -> str:
             "returns_6m_pct",
             "value_score",
             "dividend_potential_score",
+            "business_quality_score",
+            "liquidity_support_score",
             "stage",
             "tags",
             "missing_data",
@@ -961,7 +969,7 @@ def _html_table(frame: pd.DataFrame, bucket: str) -> str:
         return "<div class='subtle'>No rows</div>"
     rows: list[str] = []
     if bucket == "value":
-        columns = ["ticker", "name", "sector", "size_bucket", "prev_close", "per", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "value_score", "dividend_potential_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "sector", "size_bucket", "prev_close", "per", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "value_score", "dividend_potential_score", "business_quality_score", "liquidity_support_score", "stage", "tags", "missing_data"]
     elif bucket == "special_dividend":
         columns = ["ticker", "name", "sector", "prev_close", "dividend_yield_trailing", "dividend_yield_normalized", "dividend_gap_pct", "dividends_3y", "tags"]
     else:
@@ -996,6 +1004,9 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "returns_6m_pct",
         "value_score",
         "growth_early_score",
+        "business_quality_score",
+        "liquidity_support_score",
+        "value_trap_risk_score",
         "value_style",
         "growth_style",
         "stage",

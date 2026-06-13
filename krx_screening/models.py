@@ -25,6 +25,8 @@ class EquitySnapshot:
     returns_6m: float | None = None
     returns_12m: float | None = None
     high_52w_ratio: float | None = None
+    avg_trading_value_20d: float | None = None
+    avg_trading_value_60d: float | None = None
     sales_3y: list[float | None] = field(default_factory=list)
     op_income_3y: list[float | None] = field(default_factory=list)
     net_income_3y: list[float | None] = field(default_factory=list)
@@ -45,6 +47,9 @@ class EquitySnapshot:
     value_score: float = 0.0
     growth_early_score: float = 0.0
     dividend_potential_score: float = 0.0
+    business_quality_score: float = 0.0
+    liquidity_support_score: float = 0.0
+    value_trap_risk_score: float = 0.0
     value_style: str | None = None
     growth_style: str | None = None
     stage: str = "초입"
@@ -79,6 +84,8 @@ class EquitySnapshot:
             "returns_6m_pct": self.returns_6m,
             "returns_12m_pct": self.returns_12m,
             "high_52w_ratio_pct": self.high_52w_ratio,
+            "avg_trading_value_20d": self.avg_trading_value_20d,
+            "avg_trading_value_60d": self.avg_trading_value_60d,
             "sales_3y": "|".join(_format_num(v) for v in self.sales_3y),
             "op_income_3y": "|".join(_format_num(v) for v in self.op_income_3y),
             "net_income_3y": "|".join(_format_num(v) for v in self.net_income_3y),
@@ -94,6 +101,9 @@ class EquitySnapshot:
             "value_score": self.value_score,
             "growth_early_score": self.growth_early_score,
             "dividend_potential_score": self.dividend_potential_score,
+            "business_quality_score": self.business_quality_score,
+            "liquidity_support_score": self.liquidity_support_score,
+            "value_trap_risk_score": self.value_trap_risk_score,
             "value_style": self.value_style,
             "growth_style": self.growth_style,
             "excluded": self.excluded,

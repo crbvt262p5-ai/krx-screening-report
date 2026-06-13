@@ -121,6 +121,8 @@ def enrich_with_price_history(
         equity.returns_12m = _return_over_days(close_series, 252)
         rolling_high = close_series.tail(252).max()
         equity.high_52w_ratio = round((latest_close / rolling_high) * 100, 2) if rolling_high else None
+        equity.avg_trading_value_20d = _average_trading_value(hist, 20)
+        equity.avg_trading_value_60d = _average_trading_value(hist, 60)
 
         if equity.returns_1m is None:
             equity.mark_missing("returns_1m")
@@ -132,6 +134,10 @@ def enrich_with_price_history(
             equity.mark_missing("returns_12m")
         if equity.high_52w_ratio is None:
             equity.mark_missing("high_52w_ratio")
+        if equity.avg_trading_value_20d is None:
+            equity.mark_missing("avg_trading_value_20d")
+        if equity.avg_trading_value_60d is None:
+            equity.mark_missing("avg_trading_value_60d")
 
 
 def _load_market_listing(
@@ -231,7 +237,7 @@ def _load_price_history(ticker: str, start_date: date, end_date: date, logger: l
                 ticker,
             )
             if not frame.empty and "종가" in frame.columns:
-                return frame.rename(columns={"종가": "Close"})
+                return frame.rename(columns={"종가": "Close", "거래량": "Volume"})
         except Exception as exc:  # pragma: no cover
             logger.warning("pykrx price history failed for %s: %s", ticker, exc)
 
@@ -254,6 +260,21 @@ def _return_over_days(close_series: pd.Series, periods: int) -> float | None:
     if previous in (None, 0):
         return None
     return round(((latest / previous) - 1) * 100, 2)
+
+
+def _average_trading_value(frame: pd.DataFrame, periods: int) -> float | None:
+    if frame.empty or "Close" not in frame.columns or "Volume" not in frame.columns:
+        return None
+    window = frame[["Close", "Volume"]].dropna().tail(periods)
+    if len(window) < min(periods, 10):
+        return None
+    traded = pd.to_numeric(window["Close"], errors="coerce") * pd.to_numeric(
+        window["Volume"], errors="coerce"
+    )
+    traded = traded.dropna()
+    if traded.empty:
+        return None
+    return round(float(traded.mean()), 2)
 
 
 def _safe_row(frame: pd.DataFrame | None, ticker: str) -> pd.Series:

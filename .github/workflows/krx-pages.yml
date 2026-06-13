@@ -47,6 +47,9 @@ jobs:
           PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/python
         run: python -m krx_screening.main
 
+      - name: Verify screening outputs
+        run: python scripts/verify_krx_outputs.py
+
       - name: Build Pages site
         run: python scripts/build_pages_site.py
 
