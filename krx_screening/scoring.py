@@ -2,20 +2,64 @@ from __future__ import annotations
 
 from .models import EquitySnapshot
 
+TAM_THEME_CAGR = {
+    "AI Infrastructure": 18.0,
+    "HBM": 22.0,
+    "Advanced Packaging": 17.0,
+    "PCB": 9.0,
+    "Optical Communication": 14.0,
+    "Power Equipment": 16.0,
+    "Data Center Cooling": 19.0,
+    "Defense": 12.0,
+    "Shipbuilding": 8.0,
+    "K-Beauty": 11.0,
+    "Space / Satellite": 16.0,
+    "Healthcare Diagnostics": 10.0,
+    "Industrial Automation": 9.0,
+}
+
+TAM_THEME_ALIASES = {
+    "AI Infrastructure": ("ai", "gpu", "데이터센터", "server", "infra"),
+    "HBM": ("hbm", "고대역폭메모리", "dram", "memory"),
+    "Advanced Packaging": ("advanced packaging", "첨단패키징", "패키징", "fc-bga", "coWoS", "cowos"),
+    "PCB": ("pcb", "fpcb", "기판"),
+    "Optical Communication": ("optical", "광통신", "광모듈", "transceiver"),
+    "Power Equipment": ("power equipment", "전력기기", "변압기", "배전", "송전"),
+    "Data Center Cooling": ("cooling", "냉각", "액침", "thermal"),
+    "Defense": ("defense", "방산", "미사일", "탄약", "군수"),
+    "Shipbuilding": ("shipbuilding", "조선", "lng선", "선박"),
+    "K-Beauty": ("k-beauty", "beauty", "화장품", "cosmetic"),
+    "Space / Satellite": ("space", "satellite", "우주", "위성", "발사체"),
+    "Healthcare Diagnostics": ("diagnostics", "진단", "분자진단", "체외진단"),
+    "Industrial Automation": ("automation", "산업자동화", "factory automation", "fa", "robotics", "로봇"),
+}
+
 
 def score_equities(equities: list[EquitySnapshot]) -> None:
     for equity in equities:
         _score_value_bucket(equity)
         _score_growth_bucket(equity)
         _score_dividend_potential(equity)
+        _score_valuation_framework(equity)
         _score_business_quality(equity)
         _score_liquidity_support(equity)
+    _score_ownership_flow(equities)
+    _score_relative_industry_value(equities)
+    _score_missed_leader_detector(equities)
+    for equity in equities:
+        _score_rerating_signals(equity)
         _apply_dividend_event_tags(equity)
         _apply_weak_profit_sector_penalty(equity)
+        _score_payout_repeatability(equity)
+        _score_cashflow_quality(equity)
+        _score_governance_warning(equity)
+        _score_investability(equity)
         _apply_value_trap_warning(equity)
+        _compute_final_score(equity)
         _classify_value_style(equity)
         _classify_growth_style(equity)
         _classify_stage(equity)
+        _classify_recommendation_bucket(equity)
 
 
 def _score_value_bucket(equity: EquitySnapshot) -> None:
@@ -25,13 +69,13 @@ def _score_value_bucket(equity: EquitySnapshot) -> None:
     effective_dividend_yield = _effective_dividend_yield(equity)
 
     if equity.per is not None and equity.per <= 10:
-        score += 3.0
-        score += round(max(0.0, 10 - equity.per) * 0.08, 2)
+        score += 2.0
+        score += round(max(0.0, 10 - equity.per) * 0.05, 2)
         reasons.append("PER 10 이하")
 
     if equity.pbr is not None and equity.pbr <= 1:
-        score += 3.0
-        score += round(max(0.0, 1 - equity.pbr) * 0.8, 2)
+        score += 2.0
+        score += round(max(0.0, 1 - equity.pbr) * 0.55, 2)
         reasons.append("PBR 1 이하")
 
     if effective_dividend_yield is not None and effective_dividend_yield >= 2:
@@ -74,6 +118,17 @@ def _score_value_bucket(equity: EquitySnapshot) -> None:
         score += 0.8
         reasons.append("최근 3년 매출 우상향")
 
+    if _is_downtrend(equity.net_income_3y):
+        score -= 2.0
+        reasons.append("EPS 감소 추세")
+    elif _latest_vs_first_change(equity.net_income_3y) <= -20:
+        score -= 1.2
+        reasons.append("순이익 감소")
+
+    if _is_downtrend(equity.op_income_3y):
+        score -= 1.4
+        reasons.append("영업이익 감소 추세")
+
     if any((v or 0) < 0 for v in equity.net_income_3y):
         score -= 1.5
         reasons.append("순이익 적자 연도 존재")
@@ -113,9 +168,22 @@ def _score_growth_bucket(equity: EquitySnapshot) -> None:
         score += _trend_strength(equity.op_income_3y, cap=1.4)
         reasons.append("최근 3년 영업이익 성장")
 
+    if _is_downtrend(equity.net_income_3y):
+        score -= 1.3
+        reasons.append("EPS 감소 추세")
+
     if equity.news_keyword_hits:
         score += min(4.0, len(equity.news_keyword_hits) * 1.2)
         reasons.append("산업 모멘텀 키워드 감지")
+
+    if (
+        equity.per is not None
+        and equity.per >= 25
+        and (equity.forecast_growth_next_year or 0.0) < 25
+        and not _has_any_keyword(equity, "공급부족", "ASP 상승", "증설", "데이터센터", "AI")
+    ):
+        score -= 1.2
+        reasons.append("고PER 대비 성장 근거 약함")
 
     if equity.returns_6m is not None and equity.returns_6m >= 100:
         equity.tags.append("이미 반영")
@@ -152,6 +220,48 @@ def _score_dividend_potential(equity: EquitySnapshot) -> None:
         score += 1.5
 
     equity.dividend_potential_score = round(score, 2)
+
+
+def _score_valuation_framework(equity: EquitySnapshot) -> None:
+    score = 0.0
+
+    if equity.per is not None:
+        if equity.per <= 8:
+            score += 2.5
+        elif equity.per <= 12:
+            score += 1.5
+        elif equity.per >= 25:
+            score -= 1.0
+
+    if equity.peg is not None:
+        if equity.peg <= 0.75:
+            score += 3.0
+        elif equity.peg <= 1.2:
+            score += 2.0
+        elif equity.peg <= 1.8:
+            score += 0.8
+        elif equity.peg >= 2.5:
+            score -= 1.5
+
+    if equity.roe is not None:
+        if equity.roe >= 15:
+            score += 2.5
+        elif equity.roe >= 10:
+            score += 1.5
+        elif equity.roe >= 5:
+            score += 0.5
+        elif equity.roe < 3:
+            score -= 1.0
+
+    if equity.industry_per_discount_pct is not None:
+        if equity.industry_per_discount_pct >= 30:
+            score += 3.0
+        elif equity.industry_per_discount_pct >= 20:
+            score += 2.0
+        elif equity.industry_per_discount_pct >= 10:
+            score += 1.2
+
+    equity.valuation_score = round(_clip(score, -10.0, 10.0), 2)
 
 
 def _score_business_quality(equity: EquitySnapshot) -> None:
@@ -218,6 +328,165 @@ def _score_liquidity_support(equity: EquitySnapshot) -> None:
             score -= 0.5
 
     equity.liquidity_support_score = round(score, 2)
+
+
+def _score_rerating_signals(equity: EquitySnapshot) -> None:
+    estimate_revision = 0.0
+    tam_expansion = 0.0
+    flow_momentum = 0.0
+    shareholder_return = 0.0
+
+    forecast = equity.forecast_growth_next_year or 0.0
+    earnings_change = _latest_vs_first_change(equity.net_income_3y)
+    op_change = _latest_vs_first_change(equity.op_income_3y)
+    sales_change = _latest_vs_first_change(equity.sales_3y)
+    revision_components = _revision_components(equity)
+    if revision_components:
+        total_weight = sum(weight for _, weight in revision_components)
+        weighted_score = sum(score * weight for score, weight in revision_components)
+        estimate_revision = round(weighted_score / total_weight, 2) if total_weight else 0.0
+        if estimate_revision >= 5:
+            _add_tag(equity, "추정치 개선")
+        elif estimate_revision <= -5:
+            _add_tag(equity, "추정치 하향")
+    else:
+        if forecast >= 40:
+            estimate_revision += 3.2
+        elif forecast >= 20:
+            estimate_revision += 2.0
+        elif forecast >= 10:
+            estimate_revision += 0.8
+
+        if earnings_change >= 50:
+            estimate_revision += 1.8
+        elif earnings_change >= 15:
+            estimate_revision += 1.0
+        elif earnings_change <= -20:
+            estimate_revision -= 1.6
+
+        if op_change >= 40:
+            estimate_revision += 1.2
+        elif op_change <= -15:
+            estimate_revision -= 0.8
+
+        if _has_any_keyword(equity, "실적 상향", "컨센서스 상향", "증익", "수주 증가"):
+            estimate_revision += 1.8
+            _add_tag(equity, "추정치 개선")
+
+    matched_themes = _matched_tam_themes(equity)
+    if matched_themes:
+        theme_scores = [_cagr_band_score(TAM_THEME_CAGR[theme]) for theme in matched_themes]
+        tam_expansion += max(theme_scores)
+        if len(theme_scores) >= 2:
+            tam_expansion += min(3.0, (sum(sorted(theme_scores, reverse=True)[1:3]) * 0.25))
+    if sales_change >= 30:
+        tam_expansion += 1.0
+    if _is_uptrend(equity.sales_3y):
+        tam_expansion += 0.8
+    if _has_any_keyword(equity, "공급부족", "ASP 상승", "가동률 상승", "고부가 믹스 전환", "증설", "CAPA 확대", "점유율 확대", "신규 고객"):
+        tam_expansion += 1.2
+    if tam_expansion >= 5.0:
+        _add_tag(equity, "TAM 확대")
+
+    avg_20d = equity.avg_trading_value_20d or 0.0
+    avg_60d = equity.avg_trading_value_60d or 0.0
+    if avg_20d > 0 and avg_60d > 0:
+        ratio = avg_20d / avg_60d
+        if ratio >= 1.35:
+            flow_momentum += 2.2
+        elif ratio >= 1.1:
+            flow_momentum += 1.2
+        elif ratio <= 0.7:
+            flow_momentum -= 0.8
+    if (equity.returns_1m or 0.0) > 0 and (equity.returns_3m or 0.0) > -5:
+        flow_momentum += 0.7
+    if equity.liquidity_support_score >= 1.4:
+        flow_momentum += 0.8
+    flow_momentum += equity.ownership_flow_score
+    if flow_momentum >= 2.0:
+        _add_tag(equity, "수급 개선")
+
+    if _has_any_keyword(equity, "자사주", "소각", "배당 확대", "주주환원"):
+        shareholder_return += 2.4
+        _add_tag(equity, "주주환원 변화")
+    if equity.fcf is not None and equity.fcf > 0 and equity.payout_ratio is not None and equity.payout_ratio < 35:
+        shareholder_return += 1.0
+    if equity.net_cash is not None and equity.net_cash > 0:
+        shareholder_return += 0.8
+    if "배당상향 잠재" in equity.tags:
+        shareholder_return += 0.8
+
+    dividend_tax_benefit = 0.0
+    if (
+        (_effective_dividend_yield(equity) or 0.0) >= 3.0
+        and not equity.dividend_cut_flag
+        and _has_any_keyword(equity, "분리과세", "배당 확대", "밸류업")
+    ):
+        dividend_tax_benefit += 2.0
+        _add_tag(equity, "배당 분리과세 수혜 가능성")
+    elif (_effective_dividend_yield(equity) or 0.0) >= 3.5 and not equity.dividend_cut_flag:
+        dividend_tax_benefit += 0.8
+
+    tax_exemption_benefit = 0.0
+    if _has_any_keyword(equity, "익금불산입", "지주사", "밸류업"):
+        tax_exemption_benefit += 1.8
+        _add_tag(equity, "익금불산입 수혜 가능성")
+
+    governance_reform = 0.0
+    if _has_any_keyword(equity, "지배구조", "인적분할", "합병", "밸류업"):
+        governance_reform += 2.0
+        _add_tag(equity, "지배구조 개편 가능성")
+    elif (equity.pbr or 9) <= 0.5 and (equity.net_cash or 0) > 0:
+        governance_reform += 0.8
+
+    commercial_code_benefit = 0.0
+    if _has_any_keyword(equity, "상법 개정", "주주환원", "자사주", "소각"):
+        commercial_code_benefit += 2.0
+        _add_tag(equity, "상법 개정 수혜 가능성")
+    elif (equity.pbr or 9) <= 0.6 and (equity.roe or 0) >= 8:
+        commercial_code_benefit += 0.8
+
+    if _has_any_keyword(equity, "자사주", "소각"):
+        equity.treasury_burn_recent = True
+        _add_tag(equity, "최근 자사주 소각")
+        shareholder_return += 1.4
+
+    equity.dividend_tax_benefit_score = round(dividend_tax_benefit, 2)
+    equity.tax_exemption_benefit_score = round(tax_exemption_benefit, 2)
+    equity.governance_reform_score = round(governance_reform, 2)
+    equity.commercial_code_benefit_score = round(commercial_code_benefit, 2)
+
+    shareholder_return += (
+        dividend_tax_benefit
+        + tax_exemption_benefit
+        + governance_reform * 0.7
+        + commercial_code_benefit * 0.8
+    )
+
+    if forecast >= 35 and tam_expansion >= 5.0 and equity.per is not None and equity.per >= 20:
+        _add_tag(equity, "고PER 정당화 가능")
+
+    equity.estimate_revision_score = round(estimate_revision, 2)
+    equity.tam_expansion_score = round(tam_expansion, 2)
+    equity.flow_momentum_score = round(flow_momentum, 2)
+    equity.shareholder_return_score = round(shareholder_return, 2)
+    equity.policy_score = round(
+        shareholder_return
+        + dividend_tax_benefit * 0.5
+        + tax_exemption_benefit * 0.7
+        + governance_reform * 0.7
+        + commercial_code_benefit * 0.7,
+        2,
+    )
+
+    rerating_total = estimate_revision + tam_expansion + flow_momentum + shareholder_return
+    equity.value_score = round(equity.value_score + estimate_revision * 0.55 + shareholder_return * 0.45 + flow_momentum * 0.3, 2)
+    equity.growth_early_score = round(
+        equity.growth_early_score + estimate_revision * 0.7 + tam_expansion * 0.75 + flow_momentum * 0.4,
+        2,
+    )
+    if rerating_total >= 5.5:
+        _add_tag(equity, "재평가 후보")
 
 
 def _classify_stage(equity: EquitySnapshot) -> None:
@@ -352,6 +621,16 @@ def _apply_value_trap_warning(equity: EquitySnapshot) -> None:
         risk += 0.6
     if "이익생산 약한 섹터" in equity.tags:
         risk += 0.5
+    if equity.estimate_revision_score <= -1.0:
+        risk += 1.2
+    if equity.shareholder_return_score <= 0 and _latest_vs_first_change(equity.net_income_3y) < -20:
+        risk += 0.7
+    if equity.governance_warning_score >= 3.0:
+        risk += min(1.8, equity.governance_warning_score * 0.45)
+    if equity.cashflow_quality_score <= -1.0:
+        risk += 0.9
+    if equity.payout_repeatability_score <= -1.0:
+        risk += 0.7
 
     equity.value_trap_risk_score = round(risk, 2)
     if risk >= 2.2 and "가치 함정 주의" not in equity.tags:
@@ -372,6 +651,217 @@ def _apply_value_trap_warning(equity: EquitySnapshot) -> None:
         )
 
 
+def _score_payout_repeatability(equity: EquitySnapshot) -> None:
+    score = 0.0
+    paid_dividends = [value for value in equity.dividends_3y if value not in (None, 0)]
+    if len(paid_dividends) >= 3:
+        score += 2.5
+    elif len(paid_dividends) == 2:
+        score += 1.0
+    else:
+        score -= 1.6
+
+    if equity.dividend_cut_flag:
+        score -= 1.6
+        _add_tag(equity, "배당 감액 이력")
+    if "배당 불안정" in equity.tags:
+        score -= 1.0
+    if equity.payout_ratio is not None:
+        if equity.payout_ratio >= 20:
+            score += 1.2
+        elif equity.payout_ratio >= 10:
+            score += 0.5
+        elif equity.payout_ratio < 5:
+            score -= 1.0
+            _add_tag(equity, "낮은 배당성향")
+    if equity.payout_increase_flag:
+        score += 0.8
+    if equity.dividend_growth_rate is not None and equity.dividend_growth_rate > 0:
+        score += 0.5
+
+    equity.payout_repeatability_score = round(score, 2)
+
+
+def _score_cashflow_quality(equity: EquitySnapshot) -> None:
+    score = 0.0
+    positive_op_years = sum(1 for value in equity.op_income_3y if (value or 0) > 0)
+    latest_op = next((value for value in reversed(equity.op_income_3y) if value is not None), None)
+    latest_net = next((value for value in reversed(equity.net_income_3y) if value is not None), None)
+
+    if equity.fcf is not None:
+        if equity.fcf > 0:
+            score += 2.0
+        else:
+            score -= 1.6
+
+    if positive_op_years >= 3:
+        score += 1.4
+    elif positive_op_years <= 1:
+        score -= 1.0
+
+    if latest_op is not None and latest_op <= 0:
+        score -= 1.4
+    if latest_net is not None and latest_op not in (None, 0):
+        earnings_gap = latest_net - latest_op
+        if latest_net > 0 and earnings_gap > abs(latest_op) * 0.8:
+            score -= 1.0
+            _add_tag(equity, "비경상 이익 의심")
+    if equity.debt_ratio is not None and equity.debt_ratio >= 180:
+        score -= 0.8
+    if equity.net_cash is not None and equity.net_cash > 0:
+        score += 0.6
+
+    equity.cashflow_quality_score = round(score, 2)
+
+
+def _score_governance_warning(equity: EquitySnapshot) -> None:
+    score = 0.0
+    cheap = (equity.per is not None and equity.per <= 5) or (equity.pbr is not None and equity.pbr <= 0.5)
+    cash_rich = (
+        equity.market_cap not in (None, 0)
+        and (
+            (equity.net_cash is not None and equity.net_cash >= equity.market_cap * 0.2)
+            or (equity.cash_assets is not None and equity.cash_assets >= equity.market_cap * 0.25)
+        )
+    )
+    weak_return_policy = (
+        (equity.payout_ratio is not None and equity.payout_ratio < 10)
+        or equity.shareholder_return_score <= 0.5
+        or equity.payout_repeatability_score < 0
+    )
+
+    if cheap and weak_return_policy:
+        score += 1.8
+    if cheap and cash_rich and weak_return_policy:
+        score += 1.7
+        _add_tag(equity, "거버넌스 할인 의심")
+    if equity.treasury_stock_ratio not in (None, 0) and not equity.treasury_burn_recent:
+        score += 0.6
+    if "배당 감액 이력" in equity.tags:
+        score += 0.5
+    if "특별배당 가능성" in equity.tags and (equity.dividend_yield_normalized or 0.0) < 2.0:
+        score += 0.4
+
+    equity.governance_warning_score = round(score, 2)
+
+
+def _score_investability(equity: EquitySnapshot) -> None:
+    score = 0.0
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d
+    if reference is not None:
+        if reference >= 10_000_000_000:
+            score += 3.0
+        elif reference >= 3_000_000_000:
+            score += 1.3
+        else:
+            score -= 2.0
+    else:
+        score -= 0.6
+
+    if equity.market_cap is not None:
+        if equity.market_cap >= 300_000_000_000:
+            score += 1.6
+        elif equity.market_cap >= 100_000_000_000:
+            score += 0.6
+        else:
+            score -= 1.1
+    if equity.cashflow_quality_score > 0:
+        score += min(1.2, equity.cashflow_quality_score * 0.35)
+    if equity.governance_warning_score >= 2.5:
+        score -= min(2.0, equity.governance_warning_score * 0.45)
+    if equity.payout_repeatability_score < 0:
+        score -= 0.8
+
+    equity.investability_score = round(score, 2)
+
+
+def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
+    reasons: list[str] = []
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d
+    liquidity_gate_fail = reference is None or reference < 10_000_000_000
+    micro_liquidity = reference is not None and reference < 3_000_000_000
+    weak_repeatability = equity.payout_repeatability_score < 0.5
+    weak_cashflow = equity.cashflow_quality_score < 0.5
+    severe_cashflow = equity.cashflow_quality_score <= -1.0
+    governance_warning = equity.governance_warning_score >= 2.5
+    trap_warning = equity.value_trap_risk_score >= 2.8 or "가치 함정 주의" in equity.tags
+
+    if liquidity_gate_fail:
+        reasons.append("일평균 거래대금 10억 미만")
+    if weak_repeatability:
+        reasons.append("배당 반복성 약함")
+    if weak_cashflow:
+        reasons.append("현금창출 질 확인 필요")
+    if governance_warning:
+        reasons.append("거버넌스 할인 의심")
+    if trap_warning:
+        reasons.append("가치함정 경고")
+
+    cheap_profile = (equity.per or 99) <= 6 or (equity.pbr or 99) <= 0.6
+    turnaround_exception = (
+        equity.value_style == "Turnaround Value"
+        and not liquidity_gate_fail
+        and equity.cashflow_quality_score >= 1.0
+        and equity.business_quality_score >= 2.2
+        and not governance_warning
+        and not trap_warning
+    )
+
+    if equity.excluded or severe_cashflow:
+        equity.recommendation_bucket = "제외"
+    elif (trap_warning or (governance_warning and cheap_profile)) and (cheap_profile or governance_warning):
+        equity.recommendation_bucket = "가치함정 경고"
+    elif (
+        not liquidity_gate_fail
+        and (equity.payout_repeatability_score >= 1.5 or turnaround_exception)
+        and (equity.cashflow_quality_score >= 1.5 or turnaround_exception)
+        and not governance_warning
+        and (equity.final_score >= 22 or (turnaround_exception and equity.final_score >= 10))
+        and (equity.business_quality_score >= 2.8 or turnaround_exception)
+        and (equity.estimate_revision_score >= -1.0 or (turnaround_exception and equity.estimate_revision_score >= -3.0))
+        and (equity.investability_score >= 3.0 or (turnaround_exception and equity.investability_score >= 2.0))
+    ):
+        equity.recommendation_bucket = "실매수 검토"
+    elif (
+        (micro_liquidity or liquidity_gate_fail)
+        and equity.final_score >= 22
+        and equity.business_quality_score >= 2.2
+        and equity.cashflow_quality_score >= 0.0
+        and equity.payout_repeatability_score >= 1.0
+    ):
+        equity.recommendation_bucket = "소액 관찰"
+    elif equity.final_score >= 20 and equity.cashflow_quality_score >= -0.2:
+        equity.recommendation_bucket = "보류"
+    else:
+        equity.recommendation_bucket = "제외"
+
+    bucket_reason_order = {
+        "실매수 검토": [
+            "유동성 기준 통과",
+            "배당 반복성 양호",
+            "현금창출 질 양호",
+            "거버넌스 경고 약함",
+        ],
+        "소액 관찰": [
+            "유동성은 부족하지만 구조는 관찰 가능",
+            "핵심 점수는 유지",
+        ],
+        "보류": [
+            "재평가 요소는 있으나 확신 부족",
+        ],
+        "제외": reasons or ["핵심 게이트 미통과"],
+        "가치함정 경고": reasons or ["저평가처럼 보이나 구조적 할인 의심"],
+    }
+    if equity.recommendation_bucket == "실매수 검토":
+        equity.recommendation_reasons = bucket_reason_order["실매수 검토"] + reasons[:1]
+        if turnaround_exception:
+            equity.recommendation_reasons[1] = "턴어라운드 예외 적용"
+    elif equity.recommendation_bucket == "소액 관찰":
+        equity.recommendation_reasons = bucket_reason_order["소액 관찰"] + reasons[:2]
+    else:
+        equity.recommendation_reasons = bucket_reason_order[equity.recommendation_bucket]
+
+
 def _is_uptrend(values: list[float | None]) -> bool:
     cleaned = [value for value in values if value is not None]
     return len(cleaned) >= 3 and cleaned[0] < cleaned[1] < cleaned[2]
@@ -383,6 +873,18 @@ def _trend_strength(values: list[float | None], cap: float) -> float:
         return 0.0
     growth = max(0.0, (cleaned[-1] / cleaned[0]) - 1)
     return round(min(cap, growth * 0.6), 2)
+
+
+def _latest_vs_first_change(values: list[float | None]) -> float:
+    cleaned = [value for value in values if value not in (None, 0)]
+    if len(cleaned) < 2 or cleaned[0] == 0:
+        return 0.0
+    return round(((cleaned[-1] / cleaned[0]) - 1) * 100, 2)
+
+
+def _is_downtrend(values: list[float | None]) -> bool:
+    cleaned = [value for value in values if value is not None]
+    return len(cleaned) >= 3 and cleaned[0] > cleaned[1] > cleaned[2]
 
 
 def _sales_resilient(values: list[float | None]) -> bool:
@@ -420,3 +922,210 @@ def _effective_dividend_yield(equity: EquitySnapshot) -> float | None:
     if equity.dividend_yield_trailing is not None:
         return equity.dividend_yield_trailing
     return equity.dividend_yield
+
+
+def _has_any_keyword(equity: EquitySnapshot, *keywords: str) -> bool:
+    hits = {item.lower() for item in equity.news_keyword_hits}
+    return any(keyword.lower() in hits for keyword in keywords)
+
+
+def _add_tag(equity: EquitySnapshot, tag: str) -> None:
+    if tag not in equity.tags:
+        equity.tags.append(tag)
+
+
+def _compute_final_score(equity: EquitySnapshot) -> None:
+    valuation = _scale_component(equity.valuation_score, positive_scale=10.0, negative_scale=10.0)
+    estimate_revision = _scale_component(equity.estimate_revision_score, positive_scale=10.0, negative_scale=10.0)
+    tam_expansion = _scale_component(equity.tam_expansion_score, positive_scale=13.0, negative_scale=10.0)
+    ownership = _scale_component(equity.ownership_flow_score, positive_scale=10.0, negative_scale=5.0)
+    policy = _scale_component(equity.policy_score, positive_scale=12.0, negative_scale=8.0)
+    business_quality = _scale_component(equity.business_quality_score, positive_scale=8.5, negative_scale=5.0)
+
+    final_score = (
+        valuation * 0.20
+        + estimate_revision * 0.25
+        + tam_expansion * 0.20
+        + ownership * 0.15
+        + policy * 0.10
+        + business_quality * 0.10
+    )
+    equity.final_score = round(final_score, 2)
+    if equity.final_score >= 70:
+        _add_tag(equity, "High Conviction")
+    elif equity.final_score >= 55:
+        _add_tag(equity, "Core Watch")
+
+
+def _score_ownership_flow(equities: list[EquitySnapshot]) -> None:
+    scored = [
+        equity for equity in equities
+        if equity.net_buy_ratio_3m is not None
+    ]
+    if not scored:
+        return
+
+    ranked = sorted(scored, key=lambda item: item.net_buy_ratio_3m or 0.0, reverse=True)
+    count = len(ranked)
+    for index, equity in enumerate(ranked, start=1):
+        percentile = index / count
+        if percentile <= 0.05:
+            score = 10.0
+        elif percentile <= 0.10:
+            score = 8.0
+        elif percentile <= 0.20:
+            score = 5.0
+        elif percentile >= 0.80:
+            score = -5.0
+        else:
+            score = 0.0
+        if equity.etf_holding_change_3m not in (None, 0):
+            score += min(2.0, equity.etf_holding_change_3m * 0.5)
+        equity.ownership_flow_score = round(score, 2)
+        if score >= 8:
+            _add_tag(equity, "강한 실수급")
+        elif score <= -5:
+            _add_tag(equity, "실수급 약세")
+
+
+def _score_relative_industry_value(equities: list[EquitySnapshot]) -> None:
+    industry_map: dict[str, list[float]] = {}
+    for equity in equities:
+        industry = (equity.industry or equity.sector or "").strip()
+        if not industry or equity.per in (None, 0) or equity.per <= 0:
+            continue
+        industry_map.setdefault(industry, []).append(equity.per)
+
+    industry_avg_map: dict[str, float] = {}
+    for industry, pers in industry_map.items():
+        if len(pers) < 4:
+            continue
+        industry_avg_map[industry] = round(sum(pers) / len(pers), 2)
+
+    for equity in equities:
+        industry = (equity.industry or equity.sector or "").strip()
+        avg_per = industry_avg_map.get(industry)
+        equity.industry_avg_per = avg_per
+        if avg_per in (None, 0) or equity.per in (None, 0) or equity.per <= 0:
+            continue
+        discount_pct = round((1 - (equity.per / avg_per)) * 100, 2)
+        equity.industry_per_discount_pct = discount_pct
+
+        if discount_pct >= 30:
+            score = 10.0
+        elif discount_pct >= 20:
+            score = 7.0
+        elif discount_pct >= 10:
+            score = 5.0
+        else:
+            score = 0.0
+
+        if score > 0:
+            equity.value_score = round(equity.value_score + score * 0.4, 2)
+            if "산업 대비 저평가" not in equity.tags:
+                equity.tags.append("산업 대비 저평가")
+
+
+def _score_missed_leader_detector(equities: list[EquitySnapshot]) -> None:
+    for equity in equities:
+        score = 0.0
+
+        if equity.estimate_revision_score >= 5:
+            score += 2.5
+        if equity.tam_expansion_score >= 5:
+            score += 2.5
+        if equity.ownership_flow_score >= 5:
+            score += 2.0
+        if equity.high_52w_ratio is not None:
+            discount_from_high = 100 - equity.high_52w_ratio
+            if 15 <= discount_from_high <= 35:
+                score += 1.5
+        if (
+            equity.per is not None
+            and equity.industry_avg_per not in (None, 0)
+            and equity.per <= equity.industry_avg_per
+        ):
+            score += 1.5
+
+        equity.missed_leader_score = round(score, 2)
+        if score >= 8.5:
+            _add_tag(equity, "Missed Leader")
+
+
+def _matched_tam_themes(equity: EquitySnapshot) -> list[str]:
+    label_text = " ".join(
+        filter(
+            None,
+            [
+                equity.name or "",
+                equity.sector or "",
+                equity.industry or "",
+                " ".join(equity.news_keyword_hits),
+            ],
+        )
+    ).lower()
+    matched: list[str] = []
+    for theme, aliases in TAM_THEME_ALIASES.items():
+        if any(alias.lower() in label_text for alias in aliases):
+            matched.append(theme)
+    return matched
+
+
+def _cagr_band_score(cagr: float) -> float:
+    if cagr >= 15:
+        return 10.0
+    if cagr >= 10:
+        return 7.0
+    if cagr >= 5:
+        return 5.0
+    if cagr >= 0:
+        return 2.0
+    return -5.0
+
+
+def _scale_component(value: float | None, positive_scale: float, negative_scale: float) -> float:
+    raw = value or 0.0
+    if raw >= 0:
+        return _clip((raw / positive_scale) * 100, 0.0, 100.0)
+    return _clip((raw / negative_scale) * 100, -100.0, 0.0)
+
+
+def _clip(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _revision_components(equity: EquitySnapshot) -> list[tuple[float, float]]:
+    metric_weights = {
+        "eps": 1.0,
+        "net_income": 0.75,
+        "op_income": 0.55,
+    }
+    horizon_weights = {
+        "3m": 1.0,
+        "6m": 0.75,
+        "12m": 0.55,
+    }
+    components: list[tuple[float, float]] = []
+    for metric, metric_weight in metric_weights.items():
+        for horizon, horizon_weight in horizon_weights.items():
+            value = getattr(equity, f"{metric}_revision_{horizon}_pct", None)
+            if value is None:
+                continue
+            components.append((_revision_band_score(value), metric_weight * horizon_weight))
+    return components
+
+
+def _revision_band_score(change_pct: float) -> float:
+    if change_pct >= 20:
+        return 10.0
+    if change_pct >= 10:
+        return 7.0
+    if change_pct >= 5:
+        return 5.0
+    if change_pct <= -20:
+        return -10.0
+    if change_pct <= -10:
+        return -8.0
+    if change_pct <= -5:
+        return -5.0
+    return 0.0

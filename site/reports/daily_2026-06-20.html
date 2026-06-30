@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KRX Daily Screening 2026-06-20</title>
+  <style>
+    :root {
+      --bg: #f5efe6;
+      --panel: rgba(255,255,255,0.82);
+      --panel-strong: #fffaf3;
+      --text: #1c1a18;
+      --muted: #6b6257;
+      --line: rgba(44, 36, 27, 0.10);
+      --value: #0f766e;
+      --growth: #b45309;
+      --danger: #b91c1c;
+      --soft-green: #dff7ef;
+      --soft-amber: #fff1d6;
+      --soft-rose: #fde7e7;
+      --shadow: 0 24px 60px rgba(58, 42, 24, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Pretendard", "SUIT", "Apple SD Gothic Neo", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(227, 196, 125, 0.30), transparent 24%),
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.18), transparent 28%),
+        linear-gradient(180deg, #f7f1e7 0%, #f3ebe0 45%, #efe7dc 100%);
+      min-height: 100vh;
+    }
+    .shell {
+      width: min(1380px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+    .hero {
+      background: linear-gradient(135deg, rgba(255,250,243,0.92), rgba(244,234,219,0.95));
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -40px -60px auto;
+      width: 240px;
+      height: 240px;
+      background: radial-gradient(circle, rgba(180,83,9,0.18), transparent 62%);
+      pointer-events: none;
+    }
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 10px 0 6px;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 780px;
+      line-height: 1.6;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .metric-card {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+    }
+    .metric-card strong {
+      display: block;
+      font-size: 28px;
+      margin-top: 6px;
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .section {
+      margin-top: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .section-head h2 {
+      margin: 0;
+      font-size: 24px;
+    }
+    .section-head span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .conviction-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .pick-card {
+      border-radius: 20px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      min-height: 190px;
+    }
+    .conviction-card {
+      border-radius: 22px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,250,243,0.98), rgba(250,245,237,0.92));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    .conviction-card h3 {
+      margin: 0;
+      font-size: 30px;
+    }
+    .conviction-score {
+      display: inline-flex;
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--soft-green);
+      color: var(--value);
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .conviction-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .conviction-metrics div {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.76);
+      border: 1px solid var(--line);
+    }
+    .conviction-metrics strong {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .conviction-metrics span {
+      display: block;
+      margin-top: 4px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .reason-list {
+      margin: 16px 0 0;
+      padding-left: 18px;
+      line-height: 1.7;
+    }
+    .decision {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(15, 118, 110, 0.06);
+      border: 1px solid rgba(15, 118, 110, 0.14);
+    }
+    .pick-card.value { box-shadow: inset 0 0 0 1px rgba(15,118,110,0.08); }
+    .pick-card.growth { box-shadow: inset 0 0 0 1px rgba(180,83,9,0.08); }
+    .pick-card h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+    .ticker {
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .score-badge {
+      display: inline-flex;
+      margin-top: 10px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .score-badge.value { background: var(--soft-green); color: var(--value); }
+    .score-badge.growth { background: var(--soft-amber); color: var(--growth); }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .chip {
+      display: inline-flex;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(28,26,24,0.06);
+      color: var(--text);
+      font-size: 12px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .controls input, .controls select {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fffdf8;
+      padding: 12px 14px;
+      font: inherit;
+      min-width: 180px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.68);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #fffaf3;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    tr:hover td {
+      background: rgba(255,255,255,0.8);
+    }
+    .stage {
+      display: inline-flex;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .stage-초입 { background: var(--soft-green); color: var(--value); }
+    .stage-중간 { background: #e7eefb; color: #1d4ed8; }
+    .stage-후반 { background: var(--soft-amber); color: var(--growth); }
+    .stage-과열 { background: var(--soft-rose); color: var(--danger); }
+    .subtle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 1100px) {
+      .metric-grid, .card-grid, .conviction-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .shell { width: min(100vw - 20px, 100%); margin: 12px auto 28px; }
+      .hero, .section { padding: 18px; border-radius: 20px; }
+      .metric-grid, .card-grid, .conviction-grid { grid-template-columns: 1fr; }
+      .controls input, .controls select { width: 100%; min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="eyebrow">KRX Automated Screening</div>
+      <h1>2026-06-20</h1>
+      <p>수동 종목코드 입력 없이 KOSPI/KOSDAQ 전체 종목을 스캔한 결과입니다. Value와 Growth Early 후보를 분리해서 보고, 최근 급등 및 데이터 결측은 시각적으로 구분했습니다.</p>
+      <div class="metric-grid"><div class="metric-card"><span class="metric-label">전체 스캔 종목</span><strong>1</strong></div><div class="metric-card"><span class="metric-label">급등 제외 종목</span><strong>0</strong></div><div class="metric-card"><span class="metric-label">핵심 데이터 부족</span><strong>0</strong></div><div class="metric-card"><span class="metric-label">캐시 보강 종목</span><strong>0</strong></div><div class="metric-card"><span class="metric-label">초입 후보</span><strong>1</strong></div><div class="metric-card"><span class="metric-label">과열 후보</span><strong>0</strong></div></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Snapshot</h2>
+        <span>가장 많이 비는 항목과 운영 상태를 먼저 확인합니다.</span>
+      </div>
+      <div class="chip-row"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Conviction Notes</h2>
+        <span>최종점수 상위 후보를 메모 형식으로 정리했습니다.</span>
+      </div>
+      <div class="conviction-grid">
+            <article class="conviction-card">
+              <div class="ticker">024720</div>
+              <h3>한국콜마</h3>
+              <div class="conviction-score">총점 88</div>
+              <div class="conviction-metrics">
+                <div><strong>Valuation</strong><span>75</span></div>
+                <div><strong>EPS Revision</strong><span>92</span></div>
+                <div><strong>TAM Expansion</strong><span>95</span></div>
+                <div><strong>Ownership</strong><span>55</span></div>
+                <div><strong>Policy</strong><span>40</span></div>
+                <div><strong>Business</strong><span>72</span></div>
+              </div>
+              <div class="subtle" style="margin-top:16px;">추천 이유</div>
+              <ol class="reason-list"><li>최근 이익 추정치가 강하게 상향되고 있습니다.</li><li>한국콜마이 속한 산업의 글로벌 TAM 확대 가능성이 큽니다.</li><li>PER 11배로 업종 평균 대비 24% 할인 구간입니다.</li><li>최근 3개월 외국인·연기금 실수급이 강하게 유입되고 있습니다.</li></ol>
+              <div class="decision"><strong>판단</strong><br>현재 단계 : 초입</div>
+            </article>
+            </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Value Quick Picks</h2>
+        <span>낮은 밸류와 현금성, 배당, 이익 안정성 중심의 다변화 추천</span>
+      </div>
+      <div class="card-grid">
+            <article class="pick-card value">
+              <div class="ticker">024720</div>
+              <h3>한국콜마</h3>
+              <span class="score-badge value">score 88.0</span>
+              <div class="meta">
+                <div><strong>업종</strong><br>화장품</div>
+                <div><strong>시총구간</strong><br>-</div>
+                <div><strong>PER</strong><br>11</div>
+                <div><strong>PBR</strong><br>-</div>
+                <div><strong>6M</strong><br>-</div>
+                <div><strong>배당 T/N</strong><br>- / -</div>
+              </div>
+              <div class="chip-row">
+                <span class="chip">초입</span>
+                
+              </div>
+            </article>
+            </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Growth Early Quick Picks</h2>
+        <span>내년 성장률과 업황 시그널 중심의 다변화 추천</span>
+      </div>
+      <div class="card-grid">
+            <article class="pick-card growth">
+              <div class="ticker">024720</div>
+              <h3>한국콜마</h3>
+              <span class="score-badge growth">score 0.0</span>
+              <div class="meta">
+                <div><strong>업종</strong><br>화장품</div>
+                <div><strong>시총구간</strong><br>-</div>
+                <div><strong>PER</strong><br>11</div>
+                <div><strong>PBR</strong><br>-</div>
+                <div><strong>6M</strong><br>-</div>
+                <div><strong>배당 T/N</strong><br>- / -</div>
+              </div>
+              <div class="chip-row">
+                <span class="chip">초입</span>
+                
+              </div>
+            </article>
+            </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Value Lenses</h2>
+        <span>저평가, 배당복리, 턴어라운드를 분리해서 봅니다.</span>
+      </div>
+      <div class="section-head">
+        <h2>Deep Value</h2>
+        <span>낮은 PER/PBR 중심</span>
+      </div>
+      <div class="card-grid"></div>
+      <div class="section-head">
+        <h2>Dividend Compounder</h2>
+        <span>배당 반복성과 현금흐름 중심</span>
+      </div>
+      <div class="card-grid"></div>
+      <div class="section-head">
+        <h2>Turnaround Value</h2>
+        <span>실적 회복 초기 저평가</span>
+      </div>
+      <div class="card-grid"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Growth Lenses</h2>
+        <span>검증형 성장과 투기형 초기 성장을 분리합니다.</span>
+      </div>
+      <div class="section-head">
+        <h2>Growth Proven</h2>
+        <span>흑자/성장 검증형</span>
+      </div>
+      <div class="card-grid"></div>
+      <div class="section-head">
+        <h2>Growth Speculative</h2>
+        <span>적자 포함 초기 성장형</span>
+      </div>
+      <div class="card-grid"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Top Value 20</h2>
+        <span>보관용 Markdown보다 읽기 쉽게 압축한 표</span>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>ticker</th><th>name</th><th>sector</th><th>size_bucket</th><th>prev_close</th><th>per</th><th>peg</th><th>roe_pct</th><th>pbr</th><th>dividend_yield_trailing</th><th>dividend_yield_normalized</th><th>returns_6m_pct</th><th>final_score</th><th>value_score</th><th>estimate_revision_score</th><th>tam_expansion_score</th><th>ownership_flow_score</th><th>policy_score</th><th>dividend_potential_score</th><th>business_quality_score</th><th>liquidity_support_score</th><th>stage</th><th>tags</th><th>missing_data</th></tr></thead><tbody><tr><td>024720</td><td>한국콜마</td><td>화장품</td><td>-</td><td>-</td><td>11</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>88</td><td>0</td><td>92</td><td>95</td><td>55</td><td>40</td><td>0</td><td>72</td><td>0.0</td><td><span class='stage stage-초입'>초입</span></td><td>-</td><td>-</td></tr></tbody></table></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Top Growth 20</h2>
+        <span>과열 여부와 52주 위치를 함께 표시</span>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>ticker</th><th>name</th><th>sector</th><th>size_bucket</th><th>prev_close</th><th>per</th><th>pbr</th><th>returns_6m_pct</th><th>high_52w_ratio_pct</th><th>growth_early_score</th><th>value_score</th><th>stage</th><th>tags</th><th>missing_data</th></tr></thead><tbody><tr><td>024720</td><td>한국콜마</td><td>화장품</td><td>-</td><td>-</td><td>11</td><td>-</td><td>-</td><td>-</td><td>0</td><td>0</td><td><span class='stage stage-초입'>초입</span></td><td>-</td><td>-</td></tr></tbody></table></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Special Dividend Watch</h2>
+        <span>최근 실제 배당이 높아 보여도 평년 배당력은 낮을 수 있는 종목입니다.</span>
+      </div>
+      <div class="table-wrap"><div class='subtle'>No rows</div></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Candidate Explorer</h2>
+        <span>상위 200개 비제외 종목을 검색/필터링할 수 있습니다. 최근 반복 노출 횟수도 함께 봅니다.</span>
+      </div>
+      <div class="controls">
+        <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
+        <select id="marketFilter">
+          <option value="">시장 전체</option>
+          <option value="KOSPI">KOSPI</option>
+          <option value="KOSDAQ">KOSDAQ</option>
+        </select>
+        <select id="stageFilter">
+          <option value="">단계 전체</option>
+          <option value="초입">초입</option>
+          <option value="중간">중간</option>
+          <option value="후반">후반</option>
+          <option value="과열">과열</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>종목</th>
+              <th>시장</th>
+              <th>업종</th>
+              <th>시총구간</th>
+              <th>전일 종가</th>
+          <th>PER</th>
+          <th>PBR</th>
+          <th>배당 T</th>
+              <th>배당 N</th>
+          <th>6M</th>
+              <th>Value</th>
+              <th>Value Style</th>
+              <th>Growth</th>
+              <th>Growth Style</th>
+              <th>최근반복</th>
+              <th>Stage</th>
+              <th>태그</th>
+              <th>결측</th>
+            </tr>
+          </thead>
+          <tbody id="universeBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script>
+    const universeRows = [{"ticker": "024720", "market": "KOSPI", "name": "한국콜마", "sector": "화장품", "size_bucket": null, "prev_close": null, "per": 11, "pbr": null, "dividend_yield": null, "dividend_yield_trailing": NaN, "dividend_yield_normalized": NaN, "returns_6m_pct": NaN, "final_score": 88, "valuation_score": 75, "value_score": 0.0, "growth_early_score": 0.0, "business_quality_score": 72, "liquidity_support_score": 0.0, "value_trap_risk_score": 0.0, "estimate_revision_score": 92, "tam_expansion_score": 95, "flow_momentum_score": 0.0, "shareholder_return_score": 0.0, "ownership_flow_score": 55, "policy_score": 40, "value_style": null, "growth_style": null, "stage": "초입", "tags": "", "missing_data": "", "repeat_top_count": 0}];
+    const body = document.getElementById("universeBody");
+    const searchInput = document.getElementById("searchInput");
+    const marketFilter = document.getElementById("marketFilter");
+    const stageFilter = document.getElementById("stageFilter");
+
+    function stageBadge(stage) {
+      return `<span class="stage stage-${stage || '초입'}">${stage || '-'}</span>`;
+    }
+
+    function fmt(value, suffix = "") {
+      if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "-";
+      return `${Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}${suffix}`;
+    }
+
+    function renderUniverse() {
+      const q = searchInput.value.trim().toLowerCase();
+      const market = marketFilter.value;
+      const stage = stageFilter.value;
+      const filtered = universeRows.filter((row) => {
+        const matchQuery = !q || `${row.name} ${row.ticker}`.toLowerCase().includes(q);
+        const matchMarket = !market || row.market === market;
+        const matchStage = !stage || row.stage === stage;
+        return matchQuery && matchMarket && matchStage;
+      });
+
+      body.innerHTML = filtered.map((row) => `
+        <tr>
+          <td><strong>${row.name}</strong><div class="subtle">${row.ticker}</div></td>
+          <td>${row.market || "-"}</td>
+          <td>${row.sector || "-"}</td>
+          <td>${row.size_bucket || "-"}</td>
+          <td>${fmt(row.prev_close)}</td>
+          <td>${fmt(row.per)}</td>
+          <td>${fmt(row.pbr)}</td>
+          <td>${fmt(row.dividend_yield_trailing, "%")}</td>
+          <td>${fmt(row.dividend_yield_normalized, "%")}</td>
+          <td>${fmt(row.returns_6m_pct, "%")}</td>
+          <td>${fmt(row.value_score)}</td>
+          <td>${row.value_style || "-"}</td>
+          <td>${fmt(row.growth_early_score)}</td>
+          <td>${row.growth_style || "-"}</td>
+          <td>${fmt(row.repeat_top_count)}</td>
+          <td>${stageBadge(row.stage)}</td>
+          <td>${row.tags || "-"}</td>
+          <td>${row.missing_data || "-"}</td>
+        </tr>
+      `).join("");
+    }
+
+    searchInput.addEventListener("input", renderUniverse);
+    marketFilter.addEventListener("change", renderUniverse);
+    stageFilter.addEventListener("change", renderUniverse);
+    renderUniverse();
+  </script>
+</body>
+</html>

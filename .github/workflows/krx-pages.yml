@@ -28,16 +28,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Python
+        if: github.event_name != 'push'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: github.event_name != 'push'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run KRX screening
+        if: github.event_name != 'push'
         env:
           KRX_SCREEN_BASE_DIR: ${{ github.workspace }}
           KRX_USE_DART: ${{ secrets.KRX_USE_DART }}
@@ -48,9 +51,11 @@ jobs:
         run: python -m krx_screening.main
 
       - name: Verify screening outputs
+        if: github.event_name != 'push'
         run: python scripts/verify_krx_outputs.py
 
       - name: Build Pages site
+        if: github.event_name != 'push'
         run: python scripts/build_pages_site.py
 
       - name: Setup Pages
@@ -66,6 +71,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Send Telegram notification
+        if: github.event_name != 'push'
         env:
           KRX_SCREEN_BASE_DIR: ${{ github.workspace }}
           KRX_TELEGRAM_BOT_TOKEN: ${{ secrets.KRX_TELEGRAM_BOT_TOKEN }}
