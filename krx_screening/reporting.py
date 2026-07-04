@@ -53,6 +53,8 @@ def _build_markdown(
         by=["final_score", "estimate_revision_score", "business_quality_score"],
         ascending=False,
     )
+    value_core = buy_review[buy_review["core_bucket"].fillna("") == "Value Core"]
+    growth_core = buy_review[buy_review["core_bucket"].fillna("") == "Growth Core"]
     small_watch = working[working["recommendation_bucket"] == "소액 관찰"].sort_values(
         by=["final_score", "dividend_potential_score", "cashflow_quality_score"],
         ascending=False,
@@ -62,14 +64,18 @@ def _build_markdown(
         ascending=False,
     )
     value_top = _select_featured_rows(
-        working[~working["excluded"]],
-        score_column="final_score",
+        _value_table_ready(working[~working["excluded"]]),
+        score_column="value_score",
         history_counts=history["value"],
         weekly_counts=history["value_weekly"],
         limit=20,
     )
+    growth_universe = working[
+        (~working["excluded"])
+        & (working["recommendation_bucket"].fillna("") != "제외")
+    ]
     growth_top = _select_featured_rows(
-        working,
+        growth_universe,
         score_column="growth_early_score",
         history_counts=history["growth"],
         weekly_counts=history["growth_weekly"],
@@ -98,13 +104,21 @@ def _build_markdown(
         f"- Missing finance/data flags: {summary['missing']} 종목",
         f"- Core missing fields: {summary['core_missing']} 종목",
         f"- 실매수 검토: {summary['buy_review']} 종목",
+        f"- Value Core: {summary['value_core']} 종목",
+        f"- Growth Core: {summary['growth_core']} 종목",
         f"- 소액 관찰: {summary['small_watch']} 종목",
         f"- 가치함정 경고: {summary['trap_watch']} 종목",
         f"- Historical cache assists: {summary['cache_rows']} 종목",
         "",
+        "## Bucket Definitions",
+        _bucket_definitions_markdown(),
+        "",
         "## Quick Picks",
-        "### 실매수 검토",
-        _bullet_summary(buy_review.head(10), score_column="final_score"),
+        "### Value Core",
+        _bullet_summary(value_core.head(10), score_column="final_score"),
+        "",
+        "### Growth Core",
+        _bullet_summary(growth_core.head(10), score_column="final_score"),
         "",
         "### 소액 관찰",
         _bullet_summary(small_watch.head(10), score_column="final_score"),
@@ -164,6 +178,8 @@ def _build_html(
         by=["final_score", "estimate_revision_score", "business_quality_score"],
         ascending=False,
     )
+    value_core = buy_review[buy_review["core_bucket"].fillna("") == "Value Core"]
+    growth_core = buy_review[buy_review["core_bucket"].fillna("") == "Growth Core"]
     small_watch = working[working["recommendation_bucket"] == "소액 관찰"].sort_values(
         by=["final_score", "dividend_potential_score", "cashflow_quality_score"],
         ascending=False,
@@ -173,14 +189,18 @@ def _build_html(
         ascending=False,
     )
     value_top = _select_featured_rows(
-        working[~working["excluded"]],
-        score_column="final_score",
+        _value_table_ready(working[~working["excluded"]]),
+        score_column="value_score",
         history_counts=history["value"],
         weekly_counts=history["value_weekly"],
         limit=20,
     )
+    growth_universe = working[
+        (~working["excluded"])
+        & (working["recommendation_bucket"].fillna("") != "제외")
+    ]
     growth_top = _select_featured_rows(
-        working,
+        growth_universe,
         score_column="growth_early_score",
         history_counts=history["growth"],
         weekly_counts=history["growth_weekly"],
@@ -200,7 +220,10 @@ def _build_html(
     ).head(8)
     special_dividend_watch = _special_dividend_watchlist(working, limit=12)
     full_list = _rank_for_explorer(
-        working[~working["excluded"]],
+        working[
+            (~working["excluded"])
+            & (working["recommendation_bucket"].fillna("") != "제외")
+        ],
         score_column="final_score",
         history_counts=history["value"],
         weekly_counts=history["value_weekly"],
@@ -208,7 +231,8 @@ def _build_html(
 
     summary_cards = [
         ("전체 스캔 종목", f"{summary['total']:,}"),
-        ("실매수 검토", f"{summary['buy_review']:,}"),
+        ("Value Core", f"{summary['value_core']:,}"),
+        ("Growth Core", f"{summary['growth_core']:,}"),
         ("소액 관찰", f"{summary['small_watch']:,}"),
         ("가치함정 경고", f"{summary['trap_watch']:,}"),
         ("핵심 데이터 부족", f"{summary['core_missing']:,}"),
@@ -217,10 +241,15 @@ def _build_html(
     ]
 
     missing_counts = _top_missing_counts(working)
-    conviction_html = _conviction_grid(value_top.head(4))
+    definitions_html = _bucket_definitions_html()
+    conviction_html = _conviction_grid(pd.concat([value_core.head(2), growth_core.head(2)], ignore_index=True))
     quick_review = _card_grid(buy_review.head(8), "final_score", accent="value")
     quick_watch = _card_grid(small_watch.head(8), "final_score", accent="growth")
     trap_watch_html = _card_grid(trap_watch.head(8), "value_trap_risk_score", accent="growth")
+    memo_value_core_html = _memo_grid(value_core.head(5), title="Value Core", tone="value")
+    memo_growth_core_html = _memo_grid(growth_core.head(5), title="Growth Core", tone="growth")
+    memo_watch_html = _memo_grid(small_watch.head(5), title="소액 관찰", tone="growth")
+    memo_trap_html = _memo_grid(trap_watch.head(5), title="가치함정 경고", tone="danger")
     deep_value_html = _card_grid(deep_value, "final_score", accent="value")
     dividend_compounder_html = _card_grid(dividend_compounder, "final_score", accent="value")
     turnaround_value_html = _card_grid(turnaround_value, "final_score", accent="value")
@@ -234,7 +263,7 @@ def _build_html(
     growth_table = _html_table(growth_top, bucket="growth")
     summary_html = "".join(
         f'<div class="metric-card"><span class="metric-label">{escape(label)}</span><strong>{escape(value)}</strong></div>'
-        for label, value in summary_cards
+        for label, value in summary_cards[:4]
     )
     missing_html = "".join(
         f'<span class="chip">{escape(name)} {count}</span>' for name, count in missing_counts
@@ -316,31 +345,15 @@ def _build_html(
       line-height: 1.6;
     }}
     .hero-layout {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-      gap: 20px;
-      align-items: start;
+      display: block;
     }}
     .hero-copy {{
       position: relative;
       z-index: 1;
     }}
-    .hero-panel {{
-      position: relative;
-      z-index: 1;
-      padding: 16px;
-      border-radius: 22px;
-      background: rgba(255,255,255,0.62);
-      border: 1px solid rgba(44, 36, 27, 0.08);
-      backdrop-filter: blur(10px);
-    }}
-    .hero-panel h2 {{
-      margin: 0 0 12px;
-      font-size: 18px;
-    }}
     .metric-grid {{
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
       margin-top: 22px;
     }}
@@ -368,66 +381,15 @@ def _build_html(
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }}
-    .jump-nav {{
-      position: sticky;
-      top: 0;
-      z-index: 9;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
+    .hero-note {{
       margin-top: 18px;
-      padding: 12px;
-      border-radius: 18px;
-      background: rgba(247, 241, 231, 0.88);
+      padding: 16px 18px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.62);
       border: 1px solid rgba(44, 36, 27, 0.08);
-      backdrop-filter: blur(10px);
-    }}
-    .jump-nav a {{
-      text-decoration: none;
-      color: var(--text);
-      padding: 9px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.82);
-      border: 1px solid rgba(44, 36, 27, 0.08);
-      font-size: 13px;
-      font-weight: 700;
-    }}
-    .spotlight-stack {{
-      display: grid;
-      gap: 12px;
-    }}
-    .spotlight-card {{
-      border-radius: 18px;
-      padding: 15px 16px;
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,250,243,0.86));
-    }}
-    .spotlight-card.value {{
-      box-shadow: inset 0 0 0 1px rgba(15,118,110,0.08);
-    }}
-    .spotlight-card.growth {{
-      box-shadow: inset 0 0 0 1px rgba(180,83,9,0.08);
-    }}
-    .spotlight-label {{
-      display: inline-flex;
-      padding: 5px 9px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      background: rgba(28,26,24,0.06);
       color: var(--muted);
-    }}
-    .spotlight-card h3 {{
-      margin: 10px 0 4px;
-      font-size: 22px;
-    }}
-    .spotlight-line {{
-      margin-top: 8px;
-      color: var(--muted);
-      line-height: 1.55;
-      font-size: 13px;
+      line-height: 1.65;
+      font-size: 14px;
     }}
     .section {{
       margin-top: 20px;
@@ -453,25 +415,110 @@ def _build_html(
       color: var(--muted);
       font-size: 14px;
     }}
-    .dashboard-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-      gap: 20px;
-      align-items: start;
-    }}
-    .stack {{
-      display: grid;
-      gap: 20px;
-    }}
-    .card-grid {{
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-    }}
-    .conviction-grid {{
+    .memo-grid {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
+    }}
+    .definition-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }}
+    .definition-card {{
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255,255,255,0.64);
+      border: 1px solid var(--line);
+    }}
+    .definition-card h3 {{
+      margin: 0 0 8px;
+      font-size: 18px;
+    }}
+    .definition-card p {{
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }}
+    .definition-card ul {{
+      margin: 0;
+      padding-left: 18px;
+      font-size: 13px;
+      line-height: 1.65;
+    }}
+    .memo-panel {{
+      border-radius: 22px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255,250,243,0.9);
+    }}
+    .memo-panel.value {{ box-shadow: inset 0 0 0 1px rgba(15,118,110,0.08); }}
+    .memo-panel.growth {{ box-shadow: inset 0 0 0 1px rgba(180,83,9,0.08); }}
+    .memo-panel.danger {{ box-shadow: inset 0 0 0 1px rgba(185,28,28,0.08); }}
+    .memo-panel h2 {{
+      margin: 0 0 6px;
+      font-size: 22px;
+    }}
+    .memo-panel > p {{
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }}
+    .memo-card {{
+      padding: 14px 0;
+      border-top: 1px solid rgba(44, 36, 27, 0.08);
+    }}
+    .memo-card:first-of-type {{
+      border-top: none;
+      padding-top: 0;
+    }}
+    .memo-card h3 {{
+      margin: 0;
+      font-size: 20px;
+    }}
+    .memo-summary {{
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 13px;
+    }}
+    .memo-points {{
+      margin: 10px 0 0;
+      padding-left: 18px;
+      line-height: 1.65;
+      color: var(--text);
+      font-size: 13px;
+    }}
+    .fold {{
+      margin-top: 18px;
+      border-top: 1px solid rgba(44, 36, 27, 0.08);
+      padding-top: 18px;
+    }}
+    .fold summary {{
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+      list-style: none;
+    }}
+    .fold summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .fold summary::after {{
+      content: "열기";
+      float: right;
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 13px;
+    }}
+    .fold[open] summary::after {{
+      content: "닫기";
+    }}
+    .fold-body {{
+      margin-top: 16px;
     }}
     .pick-card {{
       border-radius: 20px;
@@ -593,30 +640,6 @@ def _build_html(
       color: #1d4ed8;
       font-weight: 700;
     }}
-    .lens-grid {{
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 16px;
-    }}
-    .lens-panel {{
-      border-radius: 20px;
-      padding: 16px;
-      background: rgba(255,255,255,0.58);
-      border: 1px solid var(--line);
-    }}
-    .lens-panel h3 {{
-      margin: 0;
-      font-size: 18px;
-    }}
-    .lens-panel p {{
-      margin: 8px 0 14px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
-    }}
-    .lens-panel .card-grid {{
-      grid-template-columns: 1fr;
-    }}
     .controls {{
       display: flex;
       gap: 10px;
@@ -686,15 +709,12 @@ def _build_html(
       font-size: 13px;
     }}
     @media (max-width: 1100px) {{
-      .hero-layout, .dashboard-grid {{ grid-template-columns: 1fr; }}
-      .lens-grid {{ grid-template-columns: 1fr; }}
-      .metric-grid, .card-grid, .conviction-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .metric-grid, .memo-grid, .card-grid, .definition-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
     @media (max-width: 720px) {{
       .shell {{ width: min(100vw - 20px, 100%); margin: 12px auto 28px; }}
       .hero, .section {{ padding: 18px; border-radius: 20px; }}
-      .metric-grid, .card-grid, .conviction-grid {{ grid-template-columns: 1fr; }}
-      .jump-nav {{ top: 6px; }}
+      .metric-grid, .memo-grid, .card-grid, .definition-grid {{ grid-template-columns: 1fr; }}
       .controls input, .controls select {{ width: 100%; min-width: 0; }}
     }}
   </style>
@@ -706,207 +726,148 @@ def _build_html(
         <div class="hero-copy">
           <div class="eyebrow">KRX Automated Screening</div>
           <h1>{escape(trading_date.isoformat())}</h1>
-          <p>수동 종목코드 입력 없이 KOSPI/KOSDAQ 전체 종목을 스캔한 결과입니다. 오늘 바로 봐야 할 Value, Growth, 재평가 초입 후보를 먼저 위로 끌어올리고, 나머지는 렌즈별로 분리해 읽기 쉽게 정리했습니다.</p>
+          <p>오늘의 결론만 먼저 보이도록 정리했습니다. 상단은 실제 투자 행동 기준으로 묶고, 세부 표와 렌즈는 아래로 접었습니다.</p>
+          <div class="hero-note">먼저 `Value Core`와 `Growth Core`를 보고, 다음으로 `소액 관찰`, 마지막으로 `가치함정 경고`를 확인하면 됩니다. 점수보다 판단 문장과 주의점을 먼저 읽는 구조입니다.</div>
         </div>
-        <aside class="hero-panel">
-          <h2>Today's Focus</h2>
-          <div class="spotlight-stack">{spotlight_html}</div>
-        </aside>
       </div>
       <div class="metric-grid">{summary_html}</div>
     </section>
-
-    <nav class="jump-nav">
-      <a href="#snapshot">운영 상태</a>
-      <a href="#conviction">핵심 메모</a>
-      <a href="#quick-picks">빠른 후보</a>
-      <a href="#missed-leaders">미발견 리더</a>
-      <a href="#value-lenses">Value 렌즈</a>
-      <a href="#growth-lenses">Growth 렌즈</a>
-      <a href="#explorer">탐색기</a>
-    </nav>
-
-    <div class="dashboard-grid">
-      <div class="stack">
-    <section class="section" id="snapshot">
+    <section class="section">
       <div class="section-head">
-        <h2>Snapshot</h2>
-        <span>가장 많이 비는 항목과 운영 상태를 먼저 확인합니다.</span>
+        <h2>오늘의 메모</h2>
+        <span>실제 행동 기준으로만 네 그룹을 나눴습니다.</span>
       </div>
-      <div class="chip-row">{missing_html}</div>
-    </section>
-
-    <section class="section" id="conviction">
-      <div class="section-head">
-        <h2>Conviction Notes</h2>
-        <span>최종점수 상위 후보를 메모 형식으로 정리했습니다.</span>
+      <div class="definition-grid">
+        {definitions_html}
       </div>
-      <div class="conviction-grid">{conviction_html}</div>
-    </section>
+      <div class="memo-grid">
+        {memo_value_core_html}
+        {memo_growth_core_html}
+        {memo_watch_html}
+        {memo_trap_html}
       </div>
-
-      <div class="stack">
-    <section class="section" id="quick-picks">
-      <div class="section-head">
-        <h2>Quick Picks</h2>
-        <span>점수 순위보다 실제 투자 가능성 분류를 먼저 봅니다.</span>
-      </div>
-      <div class="section-head">
-        <h2>실매수 검토</h2>
-        <span>유동성 10억 기준과 반복성, 현금창출 질을 통과한 후보</span>
-      </div>
-      <div class="card-grid">{quick_review}</div>
-      <div class="section-head" style="margin-top:18px;">
-        <h2>소액 관찰</h2>
-        <span>논리는 있으나 유동성이나 구조상 비중을 크게 싣기 어려운 후보</span>
-      </div>
-      <div class="card-grid">{quick_watch}</div>
-    </section>
-
-    <section class="section" id="missed-leaders">
-      <div class="section-head">
-        <h2>가치함정 경고 / Missed Leader</h2>
-        <span>싸 보여도 구조적 할인일 수 있는 종목과, 아직 덜 알려진 재평가 후보를 함께 봅니다.</span>
-      </div>
-      <div class="section-head">
-        <h2>가치함정 경고</h2>
-        <span>저PER 자체가 아니라 할인 이유를 먼저 의심해야 하는 후보</span>
-      </div>
-      <div class="card-grid">{trap_watch_html}</div>
-      <div class="section-head" style="margin-top:18px;">
-        <h2>Missed Leader Detector</h2>
-        <span>EPS 상향, TAM 확장, 외국인 순매수 시작, 52주 고점 대비 할인, 업종 평균 이하 PER 조합</span>
-      </div>
-      <div class="card-grid">{missed_leader_html}</div>
-    </section>
-      </div>
-    </div>
-
-    <section class="section" id="value-lenses">
-      <div class="section-head">
-        <h2>Value Lenses</h2>
-        <span>저평가, 배당복리, 턴어라운드를 분리해서 봅니다.</span>
-      </div>
-      <div class="lens-grid">
-        <div class="lens-panel">
-          <h3>Deep Value</h3>
-          <p>낮은 PER/PBR과 업종 할인에 집중한 보수적 가치주입니다.</p>
-          <div class="card-grid">{deep_value_html}</div>
-        </div>
-        <div class="lens-panel">
-          <h3>Dividend Compounder</h3>
-          <p>배당 반복성과 현금흐름이 같이 받쳐주는 복리형 후보입니다.</p>
-          <div class="card-grid">{dividend_compounder_html}</div>
-        </div>
-        <div class="lens-panel">
-          <h3>Turnaround Value</h3>
-          <p>실적 회복 초기인데 아직 저평가가 남아 있는 종목입니다.</p>
-          <div class="card-grid">{turnaround_value_html}</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="growth-lenses">
-      <div class="section-head">
-        <h2>Growth Lenses</h2>
-        <span>검증형 성장과 투기형 초기 성장을 분리합니다.</span>
-      </div>
-      <div class="lens-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
-        <div class="lens-panel">
-          <h3>Growth Proven</h3>
-          <p>흑자와 성장 지속성이 같이 확인되는 검증형 성장주입니다.</p>
+      <details class="fold">
+        <summary>세부 데이터와 렌즈 더 보기</summary>
+        <div class="fold-body">
+          <div class="section-head">
+            <h2>운영 상태</h2>
+            <span>가장 많이 비는 항목과 운영 상태</span>
+          </div>
+          <div class="chip-row">{missing_html}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Core 카드</h2>
+            <span>유동성 10억 기준과 반복성, 현금창출 질을 통과한 실매수 후보</span>
+          </div>
+          <div class="card-grid">{quick_review}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>소액 관찰 카드</h2>
+            <span>논리는 있으나 유동성이나 구조상 비중을 크게 싣기 어려운 후보</span>
+          </div>
+          <div class="card-grid">{quick_watch}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>가치함정 경고 카드</h2>
+            <span>싸 보여도 구조적 할인일 수 있는 후보</span>
+          </div>
+          <div class="card-grid">{trap_watch_html}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Missed Leader Detector</h2>
+            <span>아직 덜 알려진 재평가 후보</span>
+          </div>
+          <div class="card-grid">{missed_leader_html}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Growth Proven</h2>
+            <span>체급, 유동성, 실적 체력을 함께 통과한 성장주</span>
+          </div>
           <div class="card-grid">{growth_proven_html}</div>
-        </div>
-        <div class="lens-panel">
-          <h3>Growth Speculative</h3>
-          <p>변동성은 높지만 초기 사이클 가능성이 있는 공격형 후보입니다.</p>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Growth Speculative</h2>
+            <span>테마·초기 모멘텀은 있으나 아직 검증이 더 필요한 후보</span>
+          </div>
           <div class="card-grid">{growth_speculative_html}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Top Value 20</h2>
+            <span>압축한 표</span>
+          </div>
+          <div class="table-wrap">{value_table}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Top Growth 20</h2>
+            <span>과열 여부와 52주 위치를 함께 표시</span>
+          </div>
+          <div class="table-wrap">{growth_table}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Special Dividend Watch</h2>
+            <span>최근 실제 배당이 높아 보여도 평년 배당력은 낮을 수 있는 종목</span>
+          </div>
+          <div class="table-wrap">{special_watch_html}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Candidate Explorer</h2>
+            <span>상위 200개 비제외 종목 검색/필터</span>
+          </div>
+          <div class="explorer-summary">
+            <span class="chip strong">탐색 대상 {len(full_list):,}개</span>
+            <span class="chip">정렬 기준 최종점수</span>
+            <span class="chip">기본값은 실매수·관찰·경고만 표시</span>
+          </div>
+          <div class="controls">
+            <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
+            <select id="bucketFilter">
+              <option value="actionable">Core·관찰·경고</option>
+              <option value="value_core">Value Core만</option>
+              <option value="growth_core">Growth Core만</option>
+              <option value="watch">소액 관찰만</option>
+              <option value="trap">가치함정 경고만</option>
+              <option value="all">전체 보기</option>
+            </select>
+            <select id="marketFilter">
+              <option value="">시장 전체</option>
+              <option value="KOSPI">KOSPI</option>
+              <option value="KOSDAQ">KOSDAQ</option>
+            </select>
+            <select id="stageFilter">
+              <option value="">단계 전체</option>
+              <option value="초입">초입</option>
+              <option value="중간">중간</option>
+              <option value="후반">후반</option>
+              <option value="과열">과열</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>종목</th>
+                  <th>시장</th>
+                  <th>업종</th>
+                  <th>시총구간</th>
+                  <th>전일 종가</th>
+                  <th>PER</th>
+                  <th>PBR</th>
+                  <th>배당 T</th>
+                  <th>배당 N</th>
+                  <th>6M</th>
+                  <th>Value</th>
+                  <th>Value Style</th>
+                  <th>Growth</th>
+                  <th>Growth Style</th>
+                  <th>Core</th>
+                  <th>최근반복</th>
+                  <th>Stage</th>
+                  <th>태그</th>
+                  <th>결측</th>
+                </tr>
+              </thead>
+              <tbody id="universeBody"></tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <h2>Top Value 20</h2>
-        <span>보관용 Markdown보다 읽기 쉽게 압축한 표</span>
-      </div>
-      <div class="table-wrap">{value_table}</div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <h2>Top Growth 20</h2>
-        <span>과열 여부와 52주 위치를 함께 표시</span>
-      </div>
-      <div class="table-wrap">{growth_table}</div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <h2>Special Dividend Watch</h2>
-        <span>최근 실제 배당이 높아 보여도 평년 배당력은 낮을 수 있는 종목입니다.</span>
-      </div>
-      <div class="table-wrap">{special_watch_html}</div>
-    </section>
-
-    <section class="section" id="explorer">
-      <div class="section-head">
-        <h2>Candidate Explorer</h2>
-        <span>상위 200개 비제외 종목을 검색/필터링할 수 있습니다. 최근 반복 노출 횟수도 함께 봅니다.</span>
-      </div>
-      <div class="explorer-summary">
-        <span class="chip strong">탐색 대상 {len(full_list):,}개</span>
-        <span class="chip">정렬 기준 최종점수</span>
-        <span class="chip">최근 반복 노출 완화 반영</span>
-      </div>
-      <div class="controls">
-        <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
-        <select id="marketFilter">
-          <option value="">시장 전체</option>
-          <option value="KOSPI">KOSPI</option>
-          <option value="KOSDAQ">KOSDAQ</option>
-        </select>
-        <select id="stageFilter">
-          <option value="">단계 전체</option>
-          <option value="초입">초입</option>
-          <option value="중간">중간</option>
-          <option value="후반">후반</option>
-          <option value="과열">과열</option>
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>종목</th>
-              <th>시장</th>
-              <th>업종</th>
-              <th>시총구간</th>
-              <th>전일 종가</th>
-          <th>PER</th>
-          <th>PBR</th>
-          <th>배당 T</th>
-              <th>배당 N</th>
-          <th>6M</th>
-              <th>Value</th>
-              <th>Value Style</th>
-              <th>Growth</th>
-              <th>Growth Style</th>
-              <th>최근반복</th>
-              <th>Stage</th>
-              <th>태그</th>
-              <th>결측</th>
-            </tr>
-          </thead>
-          <tbody id="universeBody"></tbody>
-        </table>
-      </div>
+      </details>
     </section>
   </div>
   <script>
     const universeRows = {universe_json};
     const body = document.getElementById("universeBody");
     const searchInput = document.getElementById("searchInput");
+    const bucketFilter = document.getElementById("bucketFilter");
     const marketFilter = document.getElementById("marketFilter");
     const stageFilter = document.getElementById("stageFilter");
 
@@ -921,13 +882,28 @@ def _build_html(
 
     function renderUniverse() {{
       const q = searchInput.value.trim().toLowerCase();
+      const bucket = bucketFilter.value;
       const market = marketFilter.value;
       const stage = stageFilter.value;
       const filtered = universeRows.filter((row) => {{
         const matchQuery = !q || `${{row.name}} ${{row.ticker}}`.toLowerCase().includes(q);
+        const matchBucket =
+          bucket === "all"
+          || (bucket === "value_core" && row.core_bucket === "Value Core")
+          || (bucket === "growth_core" && row.core_bucket === "Growth Core")
+          || (bucket === "watch" && row.recommendation_bucket === "소액 관찰")
+          || (bucket === "trap" && row.recommendation_bucket === "가치함정 경고")
+          || (
+            bucket === "actionable"
+            && ["Value Core", "Growth Core"].includes(row.core_bucket)
+          )
+          || (
+            bucket === "actionable"
+            && ["소액 관찰", "가치함정 경고"].includes(row.recommendation_bucket)
+          );
         const matchMarket = !market || row.market === market;
         const matchStage = !stage || row.stage === stage;
-        return matchQuery && matchMarket && matchStage;
+        return matchQuery && matchBucket && matchMarket && matchStage;
       }});
 
       body.innerHTML = filtered.map((row) => `
@@ -946,6 +922,7 @@ def _build_html(
           <td>${{row.value_style || "-"}}</td>
           <td>${{fmt(row.growth_early_score)}}</td>
           <td>${{row.growth_style || "-"}}</td>
+          <td>${{row.core_bucket || row.recommendation_bucket || "-"}}</td>
           <td>${{fmt(row.repeat_top_count)}}</td>
           <td>${{stageBadge(row.stage)}}</td>
           <td>${{row.tags || "-"}}</td>
@@ -955,6 +932,7 @@ def _build_html(
     }}
 
     searchInput.addEventListener("input", renderUniverse);
+    bucketFilter.addEventListener("change", renderUniverse);
     marketFilter.addEventListener("change", renderUniverse);
     stageFilter.addEventListener("change", renderUniverse);
     renderUniverse();
@@ -1029,6 +1007,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("value_style", ""),
         ("growth_style", ""),
         ("recommendation_bucket", "보류"),
+        ("core_bucket", ""),
         ("recommendation_reasons", ""),
         ("repeat_top_count", 0),
         ("source_notes", ""),
@@ -1139,6 +1118,8 @@ def _summary_metrics(equities: list[EquitySnapshot], working: pd.DataFrame) -> d
         early_stage = int(((working["stage"] == "초입") & (~working["excluded"])).sum())
     cache_rows = int(working["source_notes"].fillna("").str.contains("cache:historical_csv").sum())
     buy_review = int((working["recommendation_bucket"] == "실매수 검토").sum())
+    value_core = int((working["core_bucket"].fillna("") == "Value Core").sum()) if "core_bucket" in working.columns else 0
+    growth_core = int((working["core_bucket"].fillna("") == "Growth Core").sum()) if "core_bucket" in working.columns else 0
     small_watch = int((working["recommendation_bucket"] == "소액 관찰").sum())
     trap_watch = int((working["recommendation_bucket"] == "가치함정 경고").sum())
     return {
@@ -1150,6 +1131,8 @@ def _summary_metrics(equities: list[EquitySnapshot], working: pd.DataFrame) -> d
         "early_stage": early_stage,
         "cache_rows": cache_rows,
         "buy_review": buy_review,
+        "value_core": value_core,
+        "growth_core": growth_core,
         "small_watch": small_watch,
         "trap_watch": trap_watch,
     }
@@ -1161,6 +1144,38 @@ def _top_missing_counts(working: pd.DataFrame) -> list[tuple[str, int]]:
         for item in filter(None, str(value).split("|")):
             counts[item] = counts.get(item, 0) + 1
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)[:8]
+
+
+def _value_table_ready(frame: pd.DataFrame) -> pd.DataFrame:
+    working = frame.copy()
+    required = ("prev_close", "per", "pbr")
+    for column in required:
+        if column not in working.columns:
+            working[column] = pd.NA
+        working[column] = pd.to_numeric(working[column], errors="coerce")
+
+    filtered = working[
+        working["prev_close"].notna()
+        & working["per"].notna()
+        & working["pbr"].notna()
+    ].copy()
+
+    if "industry_per_discount_pct" in filtered.columns:
+        filtered["industry_per_discount_pct"] = pd.to_numeric(
+            filtered["industry_per_discount_pct"], errors="coerce"
+        )
+
+    value_like = (
+        (filtered["per"] <= 20)
+        | (filtered["pbr"] <= 1.5)
+        | (filtered.get("industry_per_discount_pct", pd.Series(index=filtered.index, dtype=float)) >= 10)
+    )
+    filtered = filtered[value_like].copy()
+
+    # Top Value is for actual valuation comparison, not partially-populated placeholders.
+    if "recommendation_bucket" in filtered.columns:
+        filtered = filtered[filtered["recommendation_bucket"].fillna("") != "제외"]
+    return filtered
 
 
 def _load_recent_top_counts(settings: Settings, trading_date: date) -> dict[str, dict[str, int]]:
@@ -1303,6 +1318,7 @@ def _table_for_markdown(frame: pd.DataFrame, bucket: str) -> str:
         columns = [
             "ticker",
             "name",
+            "core_bucket",
             "sector",
             "size_bucket",
             "prev_close",
@@ -1371,7 +1387,7 @@ def _bullet_summary(frame: pd.DataFrame, score_column: str) -> str:
         tags = getattr(row, "tags", "")
         sector = getattr(row, "sector", "") or getattr(row, "market", "")
         size_bucket = getattr(row, "size_bucket", "")
-        recommendation_bucket = getattr(row, "recommendation_bucket", "")
+        recommendation_bucket = getattr(row, "core_bucket", None) or getattr(row, "recommendation_bucket", "")
         score_text = f"{score:.1f}" if pd.notna(score) else "-"
         returns_text = f"{returns_6m:.1f}%" if pd.notna(returns_6m) else "-"
         tag_text = f" / {tags}" if tags else ""
@@ -1443,6 +1459,43 @@ def _conviction_grid(frame: pd.DataFrame) -> str:
     return "".join(cards)
 
 
+def _memo_grid(frame: pd.DataFrame, title: str, tone: str) -> str:
+    intro_map = {
+        "Value Core": "싸 보이는 것만이 아니라 사업체력과 현금흐름까지 통과한 가치주 후보입니다.",
+        "Growth Core": "성장률만이 아니라 체급, 수급, 실적 체력까지 통과한 성장주 후보입니다.",
+        "소액 관찰": "논리는 있지만 비중을 크게 실기 전 더 확인이 필요한 후보입니다.",
+        "가치함정 경고": "싸 보이더라도 할인 이유를 먼저 설명해야 하는 후보입니다.",
+    }
+    cards: list[str] = []
+    for row in frame.itertuples(index=False):
+        reasons = _recommendation_reasons(row)[:2]
+        caution = _memo_caution(row)
+        metric_line = _bucket_metric_line(row)
+        cards.append(
+            f"""
+            <article class="memo-card">
+              <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
+              <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
+              <div class="chip-row">
+                <span class="score-badge {'value' if tone == 'value' else 'growth'}">{escape(str(getattr(row, 'core_bucket', None) or getattr(row, 'recommendation_bucket', '-') or '-'))}</span>
+                <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
+              </div>
+              <div class="memo-summary">{escape(caution)}</div>
+              <div class="memo-summary">{escape(metric_line)}</div>
+              <ul class="memo-points">{''.join(f'<li>{escape(reason)}</li>' for reason in reasons)}</ul>
+            </article>
+            """
+        )
+    body = "".join(cards) if cards else "<div class='subtle'>오늘 조건에 맞는 종목이 없습니다.</div>"
+    return f"""
+    <section class="memo-panel {tone}">
+      <h2>{escape(title)}</h2>
+      <p>{escape(intro_map.get(title, ''))}</p>
+      {body}
+    </section>
+    """
+
+
 def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, missed_frame: pd.DataFrame) -> str:
     configs = [
         ("Top Value", value_frame, "value", "final_score"),
@@ -1479,6 +1532,106 @@ def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, miss
             """
         )
     return "".join(cards)
+
+
+def _memo_caution(row: object) -> str:
+    core_bucket = str(getattr(row, "core_bucket", "") or "")
+    bucket = str(getattr(row, "recommendation_bucket", "") or "")
+    tags = str(getattr(row, "tags", "") or "")
+    if core_bucket == "Value Core":
+        return "싸 보여서가 아니라 실제 사업체력과 현금흐름까지 남은 가치주 후보입니다."
+    if core_bucket == "Growth Core":
+        return "성장률 숫자만이 아니라 실적 체력과 수급 현실성까지 통과한 성장주 후보입니다."
+    if bucket == "가치함정 경고":
+        return "저평가처럼 보여도 구조적 할인 가능성을 먼저 확인해야 합니다."
+    if "배당 불안정" in tags:
+        return "배당 반복성은 완벽하지 않아 추세 확인이 더 필요합니다."
+    if getattr(row, "value_style", "") == "Turnaround Value":
+        return "턴어라운드 초입 가정이 들어가 있으므로 실적 회복 확인이 중요합니다."
+    return "지금은 점수보다 실제 투자 가능성 기준으로 상단에 남은 후보입니다."
+
+
+def _bucket_metric_line(row: object) -> str:
+    turnover_raw = getattr(row, "avg_trading_value_20d", None)
+    turnover = _fmt_amount_short(turnover_raw)
+    investability_raw = getattr(row, "investability_score", None)
+    business_raw = getattr(row, "business_quality_score", None)
+    cashflow_raw = getattr(row, "cashflow_quality_score", None)
+    payout_raw = getattr(row, "payout_repeatability_score", None)
+    trap_raw = getattr(row, "value_trap_risk_score", None)
+
+    checks = [
+        f"거래대금 {turnover} {'통과' if _num(turnover_raw) >= 10000000000 else '미달'}",
+        f"투자가능성 {_fmt_cell(investability_raw)} {'통과' if _num(investability_raw) >= 3.0 else '미달'}",
+        f"사업체력 {_fmt_cell(business_raw)} {'통과' if _num(business_raw) >= 5.0 else '미달'}",
+        f"현금흐름 {_fmt_cell(cashflow_raw)} {'통과' if _num(cashflow_raw) >= 1.0 else '미달'}",
+        f"배당반복 {_fmt_cell(payout_raw)} {'통과' if _num(payout_raw) >= 1.0 else '미달'}",
+        f"함정위험 {_fmt_cell(trap_raw)}",
+    ]
+    return " | ".join(checks)
+
+
+def _bucket_definitions_markdown() -> str:
+    rows = [
+        "- `Value Core`: 거래대금 20D 100억 이상, `investability >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`. 저평가 근거와 사업 지속성이 함께 보여야 합니다.",
+        "- `Growth Core`: 거래대금 20D 100억 이상, `investability >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`. `Growth Proven`과 추정치/수급/TAM 중 최소 두 축이 확인돼야 합니다.",
+        "- `Value Conviction`: `PER <= 20` 또는 `PBR <= 1.5` 또는 업종 할인 20% 이상, 사업체력/현금흐름 양호.",
+        "- `Growth Conviction`: `Growth Proven`, `estimate_revision >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`, `stage != 과열`, 고PER면 정당화 태그 필요.",
+        "- `소액 관찰`: 논리는 유지되지만 유동성/체급/투자가능성 중 일부 부족. 보통 `최종점수 >= 22`, `business >= 3.8`, `cashflow >= 0`.",
+        "- `보류`: 재평가 신호는 있으나 핵심 게이트 일부 미달. 상단 추천보다는 추가 검증 대상입니다.",
+        "- `가치함정 경고`: `value_trap_risk` 높거나 거버넌스 할인 의심. 싸 보여도 할인 이유 먼저 확인.",
+        "- `제외`: 급등 제외, 최소 현실성 게이트 미통과, 현금흐름 심각 훼손 등.",
+    ]
+    return "\n".join(rows)
+
+
+def _bucket_definitions_html() -> str:
+    cards = [
+        (
+            "Value Core",
+            "단순 저PER이 아니라 사업체력, 현금흐름, 유동성까지 함께 통과한 가치주 후보입니다.",
+            [
+                "20일 거래대금 100억 이상",
+                "투자가능성 3.0 이상",
+                "사업체력 5.0 이상",
+                "현금흐름 1.0 이상",
+                "업종 대비 할인 또는 자산가치 근거",
+            ],
+        ),
+        (
+            "Growth Core",
+            "성장률만이 아니라 실적 체력, 수급, 산업 확장성을 함께 확인한 성장주 후보입니다.",
+            [
+                "20일 거래대금 100억 이상",
+                "투자가능성 3.0 이상",
+                "사업체력 5.0 이상",
+                "Growth Proven 필요",
+                "추정치 개선 + TAM/수급 확인",
+            ],
+        ),
+        (
+            "소액 관찰 / 경고 / 제외",
+            "논리는 있으나 유동성이나 구조가 약하거나, 싸 보여도 할인 이유가 의심되는 그룹입니다.",
+            [
+                "최종점수 22 이상",
+                "사업체력 3.8 이상",
+                "현금흐름 0 이상",
+                "관찰: 유동성/체급 일부 미달 허용",
+                "경고: 가치함정·거버넌스 할인 의심",
+                "제외: 급등·초저유동성·최소 현실성 미통과",
+            ],
+        ),
+    ]
+    return "".join(
+        f"""
+        <article class="definition-card">
+          <h3>{escape(title)}</h3>
+          <p>{escape(desc)}</p>
+          <ul>{''.join(f'<li>{escape(item)}</li>' for item in items)}</ul>
+        </article>
+        """
+        for title, desc, items in cards
+    )
 
 
 def _recommendation_reasons(row: object) -> list[str]:
@@ -1538,7 +1691,7 @@ def _html_table(frame: pd.DataFrame, bucket: str) -> str:
         return "<div class='subtle'>No rows</div>"
     rows: list[str] = []
     if bucket == "value":
-        columns = ["ticker", "name", "recommendation_bucket", "sector", "size_bucket", "prev_close", "per", "peg", "roe_pct", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "final_score", "value_score", "estimate_revision_score", "tam_expansion_score", "ownership_flow_score", "policy_score", "payout_repeatability_score", "cashflow_quality_score", "governance_warning_score", "investability_score", "dividend_potential_score", "business_quality_score", "liquidity_support_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "recommendation_bucket", "core_bucket", "sector", "size_bucket", "prev_close", "per", "peg", "roe_pct", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "final_score", "value_score", "estimate_revision_score", "tam_expansion_score", "ownership_flow_score", "policy_score", "payout_repeatability_score", "cashflow_quality_score", "governance_warning_score", "investability_score", "dividend_potential_score", "business_quality_score", "liquidity_support_score", "stage", "tags", "missing_data"]
     elif bucket == "special_dividend":
         columns = ["ticker", "name", "sector", "prev_close", "dividend_yield_trailing", "dividend_yield_normalized", "dividend_gap_pct", "dividends_3y", "tags"]
     else:
@@ -1590,6 +1743,7 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "investability_score",
         "missed_leader_score",
         "recommendation_bucket",
+        "core_bucket",
         "recommendation_reasons",
         "value_style",
         "growth_style",
@@ -1642,3 +1796,20 @@ def _fmt_cell(value: object, key: str | None = None) -> str:
     if key in {"per", "pbr", "dividend_yield", "returns_6m_pct", "high_52w_ratio_pct", "value_score", "growth_early_score", "dividend_potential_score", "payout_repeatability_score", "cashflow_quality_score", "governance_warning_score", "investability_score"}:
         return f"{float(value):,.2f}".rstrip("0").rstrip(".")
     return str(value)
+
+
+def _fmt_amount_short(value: object) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "-"
+    amount = float(value)
+    eok = amount / 100_000_000
+    return f"{eok:,.0f}억"
+
+
+def _num(value: object) -> float:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return float("-inf")
+    try:
+        return float(value)
+    except Exception:
+        return float("-inf")

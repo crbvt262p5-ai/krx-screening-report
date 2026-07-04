@@ -535,10 +535,30 @@ def _classify_value_style(equity: EquitySnapshot) -> None:
 
 
 def _classify_growth_style(equity: EquitySnapshot) -> None:
-    profitable_now = any((value or 0) > 0 for value in equity.op_income_3y[-2:])
+    latest_two_op = [value for value in equity.op_income_3y[-2:] if value is not None]
+    latest_two_net = [value for value in equity.net_income_3y[-2:] if value is not None]
+    profitable_now = len(latest_two_op) >= 2 and all(value > 0 for value in latest_two_op)
+    net_profitable_now = len(latest_two_net) >= 1 and latest_two_net[-1] > 0
     forecast = equity.forecast_growth_next_year or 0.0
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
     trend_ok = _is_uptrend(equity.sales_3y) or _is_uptrend(equity.op_income_3y)
-    if profitable_now and (forecast >= 20 or trend_ok):
+    revision_ok = equity.estimate_revision_score >= 3.0
+    theme_ok = equity.tam_expansion_score >= 5.0
+    investable = (
+        reference >= 10_000_000_000
+        and (equity.market_cap or 0.0) >= 300_000_000_000
+        and equity.investability_score >= 3.0
+    )
+    quality_ok = equity.business_quality_score >= 5.0 and equity.cashflow_quality_score >= 0.0
+    if (
+        profitable_now
+        and net_profitable_now
+        and quality_ok
+        and investable
+        and (forecast >= 15 or revision_ok or theme_ok)
+        and trend_ok
+        and "가치 함정 주의" not in equity.tags
+    ):
         equity.growth_style = "Growth Proven"
     else:
         equity.growth_style = "Growth Speculative"
@@ -777,6 +797,7 @@ def _score_investability(equity: EquitySnapshot) -> None:
 
 def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
     reasons: list[str] = []
+    equity.core_bucket = None
     reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d
     liquidity_gate_fail = reference is None or reference < 10_000_000_000
     micro_liquidity = reference is not None and reference < 3_000_000_000
@@ -785,6 +806,7 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
     severe_cashflow = equity.cashflow_quality_score <= -1.0
     governance_warning = equity.governance_warning_score >= 2.5
     trap_warning = equity.value_trap_risk_score >= 2.8 or "가치 함정 주의" in equity.tags
+    hard_gateway_fail = _fails_minimum_gateway(equity)
 
     if liquidity_gate_fail:
         reasons.append("일평균 거래대금 10억 미만")
@@ -796,38 +818,85 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
         reasons.append("거버넌스 할인 의심")
     if trap_warning:
         reasons.append("가치함정 경고")
+    if hard_gateway_fail:
+        reasons.append("최소 현실성 게이트 미통과")
 
     cheap_profile = (equity.per or 99) <= 6 or (equity.pbr or 99) <= 0.6
+    value_conviction = (
+        (
+            ((equity.per or 999) <= 12 and (equity.pbr or 999) <= 1.8)
+            or ((equity.pbr or 999) <= 0.8 and (equity.per or 999) <= 20)
+            or (
+                (equity.industry_per_discount_pct or 0) >= 20
+                and (equity.per or 999) <= 18
+                and (equity.pbr or 999) <= 2.0
+            )
+        )
+        and equity.business_quality_score >= 5.0
+        and equity.cashflow_quality_score >= 1.0
+        and equity.investability_score >= 3.0
+        and equity.stage != "과열"
+        and (equity.growth_style != "Growth Speculative" or ((equity.per or 999) <= 10 and (equity.pbr or 999) <= 1.2))
+        and not governance_warning
+        and not trap_warning
+    )
+    growth_conviction = (
+        equity.growth_style == "Growth Proven"
+        and equity.estimate_revision_score >= 3.0
+        and equity.business_quality_score >= 5.0
+        and equity.cashflow_quality_score >= 1.0
+        and equity.investability_score >= 3.0
+        and (equity.tam_expansion_score >= 1.8 or equity.ownership_flow_score >= 5.0)
+        and (equity.per is None or equity.per <= 60 or "고PER 정당화 가능" in equity.tags)
+        and equity.stage != "과열"
+        and not governance_warning
+        and not trap_warning
+    )
     turnaround_exception = (
         equity.value_style == "Turnaround Value"
         and not liquidity_gate_fail
         and equity.cashflow_quality_score >= 1.0
-        and equity.business_quality_score >= 2.2
+        and equity.business_quality_score >= 4.5
         and not governance_warning
         and not trap_warning
     )
 
-    if equity.excluded or severe_cashflow:
+    if equity.excluded or severe_cashflow or hard_gateway_fail:
         equity.recommendation_bucket = "제외"
     elif (trap_warning or (governance_warning and cheap_profile)) and (cheap_profile or governance_warning):
         equity.recommendation_bucket = "가치함정 경고"
     elif (
         not liquidity_gate_fail
-        and (equity.payout_repeatability_score >= 1.5 or turnaround_exception)
-        and (equity.cashflow_quality_score >= 1.5 or turnaround_exception)
-        and not governance_warning
+        and (value_conviction or growth_conviction or turnaround_exception)
+        and (equity.payout_repeatability_score >= 1.0 or growth_conviction or turnaround_exception)
+        and (equity.cashflow_quality_score >= 1.0 or turnaround_exception)
         and (equity.final_score >= 22 or (turnaround_exception and equity.final_score >= 10))
-        and (equity.business_quality_score >= 2.8 or turnaround_exception)
+        and (equity.business_quality_score >= 5.0 or turnaround_exception)
         and (equity.estimate_revision_score >= -1.0 or (turnaround_exception and equity.estimate_revision_score >= -3.0))
         and (equity.investability_score >= 3.0 or (turnaround_exception and equity.investability_score >= 2.0))
     ):
         equity.recommendation_bucket = "실매수 검토"
+        if value_conviction and not growth_conviction:
+            equity.core_bucket = "Value Core"
+        elif growth_conviction and not value_conviction:
+            equity.core_bucket = "Growth Core"
+        elif turnaround_exception:
+            equity.core_bucket = "Value Core"
+        elif value_conviction and growth_conviction:
+            value_side = (equity.value_score or 0.0) + (equity.valuation_score or 0.0)
+            growth_side = (
+                (equity.growth_early_score or 0.0)
+                + (equity.estimate_revision_score or 0.0)
+                + (equity.tam_expansion_score or 0.0)
+            )
+            equity.core_bucket = "Growth Core" if growth_side > value_side else "Value Core"
     elif (
-        (micro_liquidity or liquidity_gate_fail)
+        (micro_liquidity or liquidity_gate_fail or equity.investability_score < 3.0 or equity.business_quality_score < 5.0)
         and equity.final_score >= 22
-        and equity.business_quality_score >= 2.2
+        and equity.business_quality_score >= 3.8
         and equity.cashflow_quality_score >= 0.0
-        and equity.payout_repeatability_score >= 1.0
+        and equity.payout_repeatability_score >= 0.5
+        and not hard_gateway_fail
     ):
         equity.recommendation_bucket = "소액 관찰"
     elif equity.final_score >= 20 and equity.cashflow_quality_score >= -0.2:
@@ -854,6 +923,10 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
     }
     if equity.recommendation_bucket == "실매수 검토":
         equity.recommendation_reasons = bucket_reason_order["실매수 검토"] + reasons[:1]
+        if equity.core_bucket == "Value Core":
+            equity.recommendation_reasons[0] = "Value Core 기준 통과"
+        elif equity.core_bucket == "Growth Core":
+            equity.recommendation_reasons[0] = "Growth Core 기준 통과"
         if turnaround_exception:
             equity.recommendation_reasons[1] = "턴어라운드 예외 적용"
     elif equity.recommendation_bucket == "소액 관찰":
@@ -941,15 +1014,18 @@ def _compute_final_score(equity: EquitySnapshot) -> None:
     ownership = _scale_component(equity.ownership_flow_score, positive_scale=10.0, negative_scale=5.0)
     policy = _scale_component(equity.policy_score, positive_scale=12.0, negative_scale=8.0)
     business_quality = _scale_component(equity.business_quality_score, positive_scale=8.5, negative_scale=5.0)
+    investability = _scale_component(equity.investability_score, positive_scale=6.0, negative_scale=6.0)
 
-    final_score = (
+    base_score = (
         valuation * 0.20
         + estimate_revision * 0.25
         + tam_expansion * 0.20
         + ownership * 0.15
         + policy * 0.10
         + business_quality * 0.10
+        + investability * 0.10
     )
+    final_score = base_score - _realism_penalty(equity)
     equity.final_score = round(final_score, 2)
     if equity.final_score >= 70:
         _add_tag(equity, "High Conviction")
@@ -1081,6 +1157,57 @@ def _cagr_band_score(cagr: float) -> float:
     if cagr >= 0:
         return 2.0
     return -5.0
+
+
+def _realism_penalty(equity: EquitySnapshot) -> float:
+    penalty = 0.0
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
+    market_cap = equity.market_cap or 0.0
+
+    if reference < 1_000_000_000:
+        penalty += 4.0
+    elif reference < 3_000_000_000:
+        penalty += 2.5
+    elif reference < 10_000_000_000:
+        penalty += 1.2
+
+    if market_cap < 100_000_000_000:
+        penalty += 2.4
+    elif market_cap < 300_000_000_000:
+        penalty += 1.1
+
+    speculative_growth = (
+        equity.tam_expansion_score >= 8.0
+        and ((equity.market_cap or 0.0) < 300_000_000_000 or reference < 10_000_000_000)
+    )
+    if speculative_growth:
+        penalty += 1.0
+    if "이익생산 약한 섹터" in equity.tags and equity.business_quality_score < 6.0:
+        penalty += 0.8
+    if "가치 함정 주의" in equity.tags:
+        penalty += min(2.0, max(0.8, equity.value_trap_risk_score * 0.45))
+    if equity.cashflow_quality_score < 0:
+        penalty += min(1.5, abs(equity.cashflow_quality_score) * 0.5)
+
+    return round(penalty, 2)
+
+
+def _fails_minimum_gateway(equity: EquitySnapshot) -> bool:
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
+    market_cap = equity.market_cap or 0.0
+    has_core_value = equity.close is not None and equity.per is not None and equity.pbr is not None
+    weak_quality = equity.business_quality_score < 3.5 or equity.cashflow_quality_score < 0.0
+    speculative_theme = equity.tam_expansion_score >= 8.0 and market_cap < 300_000_000_000
+
+    if not has_core_value and market_cap < 300_000_000_000:
+        return True
+    if reference < 1_000_000_000 and market_cap < 100_000_000_000:
+        return True
+    if speculative_theme and reference < 10_000_000_000:
+        return True
+    if "가치 함정 주의" in equity.tags and weak_quality and market_cap < 300_000_000_000:
+        return True
+    return False
 
 
 def _scale_component(value: float | None, positive_scale: float, negative_scale: float) -> float:

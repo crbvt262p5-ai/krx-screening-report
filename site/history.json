@@ -1,10 +1,17 @@
 [
   {
+    "date": "2026-07-04",
+    "html": "reports/daily_2026-07-04.html",
+    "markdown": "reports/daily_2026-07-04.md",
+    "csv": "data/screened_2026-07-04.csv",
+    "latest": true
+  },
+  {
     "date": "2026-06-20",
     "html": "reports/daily_2026-06-20.html",
     "markdown": "reports/daily_2026-06-20.md",
     "csv": "data/screened_2026-06-20.csv",
-    "latest": true
+    "latest": false
   },
   {
     "date": "2026-06-12",
