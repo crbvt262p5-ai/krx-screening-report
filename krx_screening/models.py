@@ -25,6 +25,9 @@ class EquitySnapshot:
     returns_6m: float | None = None
     returns_12m: float | None = None
     high_52w_ratio: float | None = None
+    ma_20: float | None = None
+    ma_60: float | None = None
+    ma_120: float | None = None
     avg_trading_value_20d: float | None = None
     avg_trading_value_60d: float | None = None
     foreign_net_buy_3m: float | None = None
@@ -99,6 +102,7 @@ class EquitySnapshot:
     cashflow_quality_score: float = 0.0
     governance_warning_score: float = 0.0
     investability_score: float = 0.0
+    trend_support_score: float = 0.0
     missed_leader_score: float = 0.0
     final_score: float = 0.0
     recommendation_bucket: str = "보류"
@@ -138,6 +142,9 @@ class EquitySnapshot:
             "returns_6m_pct": self.returns_6m,
             "returns_12m_pct": self.returns_12m,
             "high_52w_ratio_pct": self.high_52w_ratio,
+            "ma_20": self.ma_20,
+            "ma_60": self.ma_60,
+            "ma_120": self.ma_120,
             "avg_trading_value_20d": self.avg_trading_value_20d,
             "avg_trading_value_60d": self.avg_trading_value_60d,
             "foreign_net_buy_3m": self.foreign_net_buy_3m,
@@ -207,6 +214,7 @@ class EquitySnapshot:
             "cashflow_quality_score": self.cashflow_quality_score,
             "governance_warning_score": self.governance_warning_score,
             "investability_score": self.investability_score,
+            "trend_support_score": self.trend_support_score,
             "missed_leader_score": self.missed_leader_score,
             "final_score": self.final_score,
             "recommendation_bucket": self.recommendation_bucket,

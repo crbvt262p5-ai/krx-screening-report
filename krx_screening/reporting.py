@@ -964,6 +964,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("cashflow_quality_score", 0),
         ("governance_warning_score", 0),
         ("investability_score", 0),
+        ("trend_support_score", 0),
         ("missed_leader_score", 0),
         ("final_score", 0),
         ("foreign_net_buy_3m", 0),
@@ -1039,6 +1040,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "cashflow_quality_score",
         "governance_warning_score",
         "investability_score",
+        "trend_support_score",
         "missed_leader_score",
         "final_score",
         "foreign_net_buy_3m",
@@ -1566,6 +1568,7 @@ def _bucket_metric_line(row: object) -> str:
         f"사업체력 {_fmt_cell(business_raw)} {'통과' if _num(business_raw) >= 5.0 else '미달'}",
         f"현금흐름 {_fmt_cell(cashflow_raw)} {'통과' if _num(cashflow_raw) >= 1.0 else '미달'}",
         f"배당반복 {_fmt_cell(payout_raw)} {'통과' if _num(payout_raw) >= 1.0 else '미달'}",
+        f"추세 {_fmt_cell(getattr(row, 'trend_support_score', None))}",
         f"함정위험 {_fmt_cell(trap_raw)}",
     ]
     return " | ".join(checks)
@@ -1577,6 +1580,7 @@ def _bucket_definitions_markdown() -> str:
         "- `Growth Core`: 거래대금 20D 100억 이상, `investability >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`. `Growth Proven`과 추정치/수급/TAM 중 최소 두 축이 확인돼야 합니다.",
         "- `Value Conviction`: `PER <= 20` 또는 `PBR <= 1.5` 또는 업종 할인 20% 이상, 사업체력/현금흐름 양호.",
         "- `Growth Conviction`: `Growth Proven`, `estimate_revision >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`, `stage != 과열`, 고PER면 정당화 태그 필요.",
+        "- `정배열 추세`: `종가 >= 20일선 >= 60일선 >= 120일선`이면 `조기매도 경계` 또는 `추세 유지` 태그를 붙여, 가치 해소 뒤에도 추세 지속 여부를 확인합니다.",
         "- `소액 관찰`: 논리는 유지되지만 유동성/체급/투자가능성 중 일부 부족. 보통 `최종점수 >= 22`, `business >= 3.8`, `cashflow >= 0`.",
         "- `보류`: 재평가 신호는 있으나 핵심 게이트 일부 미달. 상단 추천보다는 추가 검증 대상입니다.",
         "- `가치함정 경고`: `value_trap_risk` 높거나 거버넌스 할인 의심. 싸 보여도 할인 이유 먼저 확인.",
@@ -1596,6 +1600,7 @@ def _bucket_definitions_html() -> str:
                 "사업체력 5.0 이상",
                 "현금흐름 1.0 이상",
                 "업종 대비 할인 또는 자산가치 근거",
+                "정배열이면 조기매도 경계",
             ],
         ),
         (
@@ -1607,6 +1612,7 @@ def _bucket_definitions_html() -> str:
                 "사업체력 5.0 이상",
                 "Growth Proven 필요",
                 "추정치 개선 + TAM/수급 확인",
+                "정배열 유지면 추세 보유 우선",
             ],
         ),
         (
@@ -1680,6 +1686,13 @@ def _recommendation_reasons(row: object) -> list[str]:
     business = getattr(row, "business_quality_score", 0) or 0
     if business >= 7:
         reasons.append("이익 체력과 사업 지속성이 안정적인 편입니다.")
+
+    trend_support = getattr(row, "trend_support_score", 0) or 0
+    tags = str(getattr(row, "tags", "") or "")
+    if "조기매도 경계" in tags and trend_support > 0:
+        reasons.append("이동평균선 정배열이 유지돼, 밸류 해소 뒤에도 추세가 이어질 가능성을 시사합니다.")
+    elif "사이클 종료 점검" in tags:
+        reasons.append("장기 이동평균선 아래로 약해져 사이클 종료 여부를 다시 점검할 구간입니다.")
 
     if not reasons:
         reasons.append("여러 축에서 평균 이상 점수를 받아 관찰 우선순위가 높습니다.")

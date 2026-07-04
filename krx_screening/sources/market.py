@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -60,13 +61,21 @@ def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataB
             listing_detail.get("market_cap")
         )
         snapshot.size_bucket = _classify_size_bucket(snapshot.market_cap)
-        snapshot.per = _coerce_float(fund_row.get("PER"))
-        snapshot.pbr = _coerce_float(fund_row.get("PBR"))
-        snapshot.dividend_yield = _coerce_float(fund_row.get("DIV"))
+        snapshot.per = _coerce_float(fund_row.get("PER")) or _coerce_float(listing_detail.get("per"))
+        snapshot.pbr = _coerce_float(fund_row.get("PBR")) or _coerce_float(listing_detail.get("pbr"))
+        snapshot.dividend_yield = _coerce_float(fund_row.get("DIV")) or _coerce_float(
+            listing_detail.get("dividend_yield")
+        )
         if snapshot.dividend_yield is not None:
-            snapshot.dividend_yield_trailing = snapshot.dividend_yield
-            snapshot.dividend_yield_normalized = snapshot.dividend_yield
-            snapshot.dividend_yield_source = "pykrx_snapshot"
+            snapshot.dividend_yield_trailing = _coerce_float(listing_detail.get("dividend_yield_trailing"))
+            snapshot.dividend_yield_normalized = _coerce_float(listing_detail.get("dividend_yield_normalized"))
+            snapshot.dividend_yield_source = _coerce_text(listing_detail.get("dividend_yield_source"))
+            if snapshot.dividend_yield_trailing is None:
+                snapshot.dividend_yield_trailing = snapshot.dividend_yield
+            if snapshot.dividend_yield_normalized is None:
+                snapshot.dividend_yield_normalized = snapshot.dividend_yield
+            if snapshot.dividend_yield_source is None:
+                snapshot.dividend_yield_source = "pykrx_snapshot"
 
         if snapshot.close is None:
             snapshot.mark_missing("prev_close")
@@ -80,6 +89,8 @@ def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataB
             snapshot.mark_missing("dividend_yield")
 
         equities.append(snapshot)
+
+    _enrich_with_investor_flows(equities, trading_date, logger)
 
     return MarketDataBundle(trading_date=trading_date, equities=equities)
 
@@ -121,6 +132,9 @@ def enrich_with_price_history(
         equity.returns_12m = _return_over_days(close_series, 252)
         rolling_high = close_series.tail(252).max()
         equity.high_52w_ratio = round((latest_close / rolling_high) * 100, 2) if rolling_high else None
+        equity.ma_20 = _moving_average(close_series, 20)
+        equity.ma_60 = _moving_average(close_series, 60)
+        equity.ma_120 = _moving_average(close_series, 120)
         equity.avg_trading_value_20d = _average_trading_value(hist, 20)
         equity.avg_trading_value_60d = _average_trading_value(hist, 60)
 
@@ -134,6 +148,12 @@ def enrich_with_price_history(
             equity.mark_missing("returns_12m")
         if equity.high_52w_ratio is None:
             equity.mark_missing("high_52w_ratio")
+        if equity.ma_20 is None:
+            equity.mark_missing("ma_20")
+        if equity.ma_60 is None:
+            equity.mark_missing("ma_60")
+        if equity.ma_120 is None:
+            equity.mark_missing("ma_120")
         if equity.avg_trading_value_20d is None:
             equity.mark_missing("avg_trading_value_20d")
         if equity.avg_trading_value_60d is None:
@@ -142,7 +162,7 @@ def enrich_with_price_history(
 
 def _load_market_listing(
     market: str, logger: logging.Logger
-) -> tuple[list[dict[str, str]], dict[str, dict[str, float | None]]]:
+) -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
     if pykrx_stock is not None:
         try:
             tickers = pykrx_stock.get_market_ticker_list(market=market)
@@ -159,21 +179,32 @@ def _load_market_listing(
             logger.warning("pykrx listing failed for %s: %s", market, exc)
 
     if fdr is not None:
-        listing = fdr.StockListing(market)
-        listings = [
-            {"ticker": str(row.Code).zfill(6), "name": row.Name, "market": market}
-            for row in listing.itertuples()
-        ]
-        detail_map = {
-            str(row.Code).zfill(6): {
-                "close": _coerce_float(getattr(row, "Close", None)),
-                "market_cap": _coerce_float(getattr(row, "Marcap", None)),
-                "sector": _first_present_text(row, "Sector", "업종", "WICS업종명"),
-                "industry": _first_present_text(row, "Industry", "산업", "업종소"),
+        try:
+            listing = fdr.StockListing(market)
+            listings = [
+                {"ticker": str(row.Code).zfill(6), "name": row.Name, "market": market}
+                for row in listing.itertuples()
+            ]
+            detail_map = {
+                str(row.Code).zfill(6): {
+                    "close": _coerce_float(getattr(row, "Close", None)),
+                    "market_cap": _coerce_float(getattr(row, "Marcap", None)),
+                    "sector": _first_present_text(row, "Sector", "업종", "WICS업종명"),
+                    "industry": _first_present_text(row, "Industry", "산업", "업종소"),
+                }
+                for row in listing.itertuples()
             }
-            for row in listing.itertuples()
-        }
-        return listings, detail_map
+            return listings, detail_map
+        except Exception as exc:  # pragma: no cover
+            logger.warning("FinanceDataReader listing failed for %s: %s", market, exc)
+
+    cached_listings, cached_detail_map = _load_cached_market_listing(market, logger)
+    if cached_listings:
+        logger.warning(
+            "Using cached historical universe for %s because live listing sources are unavailable",
+            market,
+        )
+        return cached_listings, cached_detail_map
 
     logger.error("No market listing source available for %s", market)
     return [], {}
@@ -252,6 +283,70 @@ def _load_price_history(ticker: str, start_date: date, end_date: date, logger: l
     return pd.DataFrame()
 
 
+def _enrich_with_investor_flows(
+    equities: list[EquitySnapshot], trading_date: date, logger: logging.Logger
+) -> None:
+    if pykrx_stock is None:
+        for equity in equities:
+            equity.mark_missing("investor_flow_3m", "etf_inclusion_change_3m")
+        return
+
+    start_date = trading_date - timedelta(days=92)
+    flow_maps = {
+        "외국인": {},
+        "연기금": {},
+    }
+    for market in ("KOSPI", "KOSDAQ"):
+        for investor in ("외국인", "연기금"):
+            try:
+                frame = pykrx_stock.get_market_net_purchases_of_equities_by_ticker(
+                    start_date.strftime("%Y%m%d"),
+                    trading_date.strftime("%Y%m%d"),
+                    market=market,
+                    investor=investor,
+                )
+            except Exception as exc:  # pragma: no cover
+                logger.warning(
+                    "pykrx investor flow failed for %s %s: %s",
+                    market,
+                    investor,
+                    exc,
+                )
+                continue
+            if frame is None or frame.empty:
+                continue
+            net_col = _find_net_buy_column(frame)
+            if net_col is None:
+                continue
+            for ticker, value in frame[net_col].items():
+                flow_maps[investor][str(ticker).zfill(6)] = _coerce_float(value)
+
+    for equity in equities:
+        equity.foreign_net_buy_3m = flow_maps["외국인"].get(equity.ticker)
+        equity.pension_net_buy_3m = flow_maps["연기금"].get(equity.ticker)
+        if equity.market_cap not in (None, 0):
+            if equity.foreign_net_buy_3m is not None:
+                equity.foreign_net_buy_ratio_3m = round(
+                    (equity.foreign_net_buy_3m / equity.market_cap) * 100,
+                    4,
+                )
+            if equity.pension_net_buy_3m is not None:
+                equity.pension_net_buy_ratio_3m = round(
+                    (equity.pension_net_buy_3m / equity.market_cap) * 100,
+                    4,
+                )
+            combined = sum(
+                value for value in (equity.foreign_net_buy_3m, equity.pension_net_buy_3m) if value is not None
+            )
+            if combined:
+                equity.net_buy_ratio_3m = round((combined / equity.market_cap) * 100, 4)
+        if equity.net_buy_ratio_3m is None:
+            equity.mark_missing("investor_flow_3m")
+        else:
+            equity.clear_missing("investor_flow_3m")
+        equity.mark_missing("etf_inclusion_change_3m")
+
+
 def _return_over_days(close_series: pd.Series, periods: int) -> float | None:
     if len(close_series) <= periods:
         return None
@@ -275,6 +370,78 @@ def _average_trading_value(frame: pd.DataFrame, periods: int) -> float | None:
     if traded.empty:
         return None
     return round(float(traded.mean()), 2)
+
+
+def _moving_average(close_series: pd.Series, periods: int) -> float | None:
+    window = close_series.dropna().tail(periods)
+    if len(window) < min(periods, 15):
+        return None
+    return round(float(window.mean()), 2)
+
+
+def _find_net_buy_column(frame: pd.DataFrame) -> str | None:
+    for candidate in ("순매수거래대금", "순매수대금", "순매수"):
+        if candidate in frame.columns:
+            return candidate
+    return None
+
+
+def _load_cached_market_listing(
+    market: str,
+    logger: logging.Logger,
+) -> tuple[list[dict[str, str]], dict[str, dict[str, object]]]:
+    data_dir = Path.cwd() / "data"
+    for path in sorted(data_dir.glob("screened_*.csv"), reverse=True):
+        try:
+            frame = pd.read_csv(path, dtype={"ticker": str}, encoding="utf-8-sig")
+        except Exception:
+            continue
+        if len(frame) < 1000:
+            continue
+        if "market" not in frame.columns or "name" not in frame.columns:
+            continue
+        filtered = frame[frame["market"].astype(str) == market].copy()
+        if filtered.empty:
+            continue
+        filtered["ticker"] = filtered["ticker"].astype(str).str.zfill(6)
+        listings = [
+            {"ticker": row.ticker, "name": str(row.name), "market": market}
+            for row in filtered[["ticker", "name"]].drop_duplicates().itertuples(index=False)
+        ]
+        detail_map = {
+            str(row.ticker): {
+                "close": _coerce_float(getattr(row, "prev_close", None)),
+                "market_cap": _coerce_float(getattr(row, "market_cap", None)),
+                "per": _coerce_float(getattr(row, "per", None)),
+                "pbr": _coerce_float(getattr(row, "pbr", None)),
+                "dividend_yield": _coerce_float(getattr(row, "dividend_yield", None)),
+                "dividend_yield_trailing": _coerce_float(getattr(row, "dividend_yield_trailing", None)),
+                "dividend_yield_normalized": _coerce_float(getattr(row, "dividend_yield_normalized", None)),
+                "dividend_yield_source": _coerce_text(getattr(row, "dividend_yield_source", None)),
+                "sector": _coerce_text(getattr(row, "sector", None)),
+                "industry": _coerce_text(getattr(row, "industry", None)),
+            }
+            for row in filtered[
+                [
+                    "ticker",
+                    "prev_close",
+                    "market_cap",
+                    "per",
+                    "pbr",
+                    "dividend_yield",
+                    "dividend_yield_trailing",
+                    "dividend_yield_normalized",
+                    "dividend_yield_source",
+                    "sector",
+                    "industry",
+                ]
+            ]
+            .drop_duplicates(subset=["ticker"])
+            .itertuples(index=False)
+        }
+        logger.info("Loaded cached universe from %s for %s", path.name, market)
+        return listings, detail_map
+    return [], {}
 
 
 def _safe_row(frame: pd.DataFrame | None, ticker: str) -> pd.Series:

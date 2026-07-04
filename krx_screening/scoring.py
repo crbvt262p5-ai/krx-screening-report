@@ -54,6 +54,7 @@ def score_equities(equities: list[EquitySnapshot]) -> None:
         _score_cashflow_quality(equity)
         _score_governance_warning(equity)
         _score_investability(equity)
+        _score_trend_support(equity)
         _apply_value_trap_warning(equity)
         _compute_final_score(equity)
         _classify_value_style(equity)
@@ -795,6 +796,48 @@ def _score_investability(equity: EquitySnapshot) -> None:
     equity.investability_score = round(score, 2)
 
 
+def _score_trend_support(equity: EquitySnapshot) -> None:
+    score = 0.0
+    close = equity.close
+    ma20 = equity.ma_20
+    ma60 = equity.ma_60
+    ma120 = equity.ma_120
+
+    if close in (None, 0) or ma20 is None or ma60 is None or ma120 is None:
+        equity.trend_support_score = 0.0
+        return
+
+    bullish_stack = close >= ma20 >= ma60 >= ma120
+    early_bullish = close >= ma20 >= ma60 and ma120 <= ma60
+    breakdown = close < ma20 and ma20 < ma60
+    long_break = close < ma120 and ma60 < ma120
+
+    if bullish_stack:
+        score += 3.0
+        if equity.returns_6m not in (None, 0) and (equity.returns_6m or 0.0) >= 15:
+            score += 1.0
+        if equity.stage in {"중간", "후반"}:
+            _add_tag(equity, "조기매도 경계")
+        else:
+            _add_tag(equity, "추세 유지")
+    elif early_bullish:
+        score += 1.5
+        _add_tag(equity, "추세 유지")
+    elif breakdown:
+        score -= 1.5
+        _add_tag(equity, "단기 추세 약화")
+    elif long_break:
+        score -= 3.0
+        _add_tag(equity, "사이클 종료 점검")
+
+    if close >= ma120 and ma20 >= ma120:
+        score += 0.5
+    elif close < ma120:
+        score -= 0.8
+
+    equity.trend_support_score = round(score, 2)
+
+
 def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
     reasons: list[str] = []
     equity.core_bucket = None
@@ -1042,6 +1085,7 @@ def _compute_final_score(equity: EquitySnapshot) -> None:
     policy = _scale_component(equity.policy_score, positive_scale=12.0, negative_scale=8.0)
     business_quality = _scale_component(equity.business_quality_score, positive_scale=8.5, negative_scale=5.0)
     investability = _scale_component(equity.investability_score, positive_scale=6.0, negative_scale=6.0)
+    trend_support = _scale_component(equity.trend_support_score, positive_scale=4.5, negative_scale=4.5)
 
     base_score = (
         valuation * 0.20
@@ -1051,6 +1095,7 @@ def _compute_final_score(equity: EquitySnapshot) -> None:
         + policy * 0.10
         + business_quality * 0.10
         + investability * 0.10
+        + trend_support * 0.08
     )
     final_score = base_score - _realism_penalty(equity)
     equity.final_score = round(final_score, 2)
