@@ -821,6 +821,24 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
     if hard_gateway_fail:
         reasons.append("최소 현실성 게이트 미통과")
 
+    growth_heat = equity.stage in {"후반", "과열"} or "추격주의" in equity.tags
+    trailing_dividend = equity.dividend_yield_trailing or 0.0
+    normalized_dividend = equity.dividend_yield_normalized or 0.0
+    dividend_distortion = (
+        "특별배당 가능성" in equity.tags
+        and trailing_dividend >= 1.0
+        and normalized_dividend < max(1.0, trailing_dividend * 0.45)
+    )
+    weak_profit_sector = "이익생산 약한 섹터" in equity.tags
+    high_growth_multiple = (equity.per or 0.0) >= 25 or (equity.pbr or 0.0) >= 5.0
+    premium_growth_multiple = (equity.per or 0.0) >= 40 or (equity.pbr or 0.0) >= 7.0
+    strong_growth_evidence = (
+        equity.estimate_revision_score >= 5.0
+        and equity.tam_expansion_score >= 5.0
+        and equity.business_quality_score >= 7.0
+        and equity.cashflow_quality_score >= 1.4
+    )
+
     cheap_profile = (equity.per or 99) <= 6 or (equity.pbr or 99) <= 0.6
     value_conviction = (
         (
@@ -848,6 +866,15 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
         and equity.investability_score >= 3.0
         and (equity.tam_expansion_score >= 1.8 or equity.ownership_flow_score >= 5.0)
         and (equity.per is None or equity.per <= 60 or "고PER 정당화 가능" in equity.tags)
+        and not dividend_distortion
+        and not (growth_heat and not strong_growth_evidence)
+        and not (premium_growth_multiple and not strong_growth_evidence)
+        and not (weak_profit_sector and (equity.estimate_revision_score < 5.0 or equity.business_quality_score < 6.5))
+        and not (
+            high_growth_multiple
+            and equity.ownership_flow_score < 5.0
+            and equity.tam_expansion_score < 5.0
+        )
         and equity.stage != "과열"
         and not governance_warning
         and not trap_warning
