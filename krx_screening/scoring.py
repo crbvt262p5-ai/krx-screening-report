@@ -45,6 +45,7 @@ def score_equities(equities: list[EquitySnapshot]) -> None:
         _score_liquidity_support(equity)
     _score_ownership_flow(equities)
     _score_relative_industry_value(equities)
+    _score_leader_cycle(equities)
     _score_missed_leader_detector(equities)
     for equity in equities:
         _score_rerating_signals(equity)
@@ -61,6 +62,7 @@ def score_equities(equities: list[EquitySnapshot]) -> None:
         _classify_growth_style(equity)
         _classify_stage(equity)
         _classify_recommendation_bucket(equity)
+        _classify_leader_bucket(equity)
 
 
 def _score_value_bucket(equity: EquitySnapshot) -> None:
@@ -1005,6 +1007,39 @@ def _classify_recommendation_bucket(equity: EquitySnapshot) -> None:
         equity.recommendation_reasons = bucket_reason_order[equity.recommendation_bucket]
 
 
+def _classify_leader_bucket(equity: EquitySnapshot) -> None:
+    equity.leader_bucket = None
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
+    market_cap = equity.market_cap or 0.0
+    if reference < 3_000_000_000 or market_cap < 300_000_000_000 or equity.value_trap_risk_score >= 2.8:
+        return
+    trend_or_high = equity.trend_support_score >= 1.5 or (equity.high_52w_ratio or 0.0) >= 80.0
+
+    if (
+        equity.leader_cycle_score >= 8.0
+        and trend_or_high
+        and equity.returns_3m not in (None, 0)
+        and (equity.returns_3m or 0.0) >= 25
+        and reference >= 10_000_000_000
+        and market_cap >= 300_000_000_000
+        and equity.value_trap_risk_score < 1.5
+    ):
+        equity.leader_bucket = "Leader"
+    elif (
+        equity.leader_cycle_score >= 6.0
+        and ((equity.returns_3m or 0.0) >= 10 or (equity.returns_1m or 0.0) >= 8)
+        and (equity.trend_support_score >= 0.0 or (equity.high_52w_ratio or 0.0) >= 75.0)
+        and equity.estimate_revision_score >= 0.8
+        and reference >= 3_000_000_000
+    ):
+        equity.leader_bucket = "Leader Candidate"
+    elif (
+        (equity.returns_3m or 0.0) > 0
+        and equity.leader_cycle_score >= 1.0
+    ):
+        equity.leader_bucket = "Follower"
+
+
 def _is_uptrend(values: list[float | None]) -> bool:
     cleaned = [value for value in values if value is not None]
     return len(cleaned) >= 3 and cleaned[0] < cleaned[1] < cleaned[2]
@@ -1200,6 +1235,118 @@ def _score_missed_leader_detector(equities: list[EquitySnapshot]) -> None:
             _add_tag(equity, "Missed Leader")
 
 
+def _score_leader_cycle(equities: list[EquitySnapshot]) -> None:
+    market_returns_3m: dict[str, list[float]] = {}
+    sector_returns_3m: dict[str, list[float]] = {}
+    sector_returns_1m: dict[str, list[float]] = {}
+
+    for equity in equities:
+        if equity.returns_3m is not None:
+            market_returns_3m.setdefault(equity.market, []).append(equity.returns_3m)
+            sector = (equity.industry or equity.sector or "").strip()
+            if sector:
+                sector_returns_3m.setdefault(sector, []).append(equity.returns_3m)
+        if equity.returns_1m is not None:
+            sector = (equity.industry or equity.sector or "").strip()
+            if sector:
+                sector_returns_1m.setdefault(sector, []).append(equity.returns_1m)
+
+    market_baseline = {
+        market: _median(values) for market, values in market_returns_3m.items() if values
+    }
+
+    for equity in equities:
+        score = 0.0
+        sector = (equity.industry or equity.sector or "").strip()
+        market_baseline_3m = market_baseline.get(equity.market, 0.0)
+        rel_3m = (equity.returns_3m or 0.0) - market_baseline_3m
+        rel_1m = equity.returns_1m or 0.0
+        reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
+        market_cap = equity.market_cap or 0.0
+
+        sector_top_3m = max(sector_returns_3m.get(sector, [0.0])) if sector else 0.0
+        sector_top_1m = max(sector_returns_1m.get(sector, [0.0])) if sector else 0.0
+        near_sector_leader_3m = sector_top_3m > 0 and (equity.returns_3m or 0.0) >= sector_top_3m * 0.8
+        near_sector_leader_1m = sector_top_1m > 0 and (equity.returns_1m or 0.0) >= sector_top_1m * 0.8
+
+        if rel_3m >= 25:
+            score += 3.5
+        elif rel_3m >= 15:
+            score += 2.5
+        elif rel_3m >= 7:
+            score += 1.5
+        elif rel_3m <= -10:
+            score -= 2.0
+
+        if rel_1m >= 8:
+            score += 1.0
+        elif rel_1m <= -8:
+            score -= 0.8
+
+        if near_sector_leader_3m:
+            score += 2.0
+        if near_sector_leader_1m:
+            score += 1.2
+
+        if equity.trend_support_score >= 3.0:
+            score += 2.0
+        elif equity.trend_support_score >= 1.5:
+            score += 1.0
+        elif equity.trend_support_score < 0:
+            score -= 1.5
+
+        if equity.high_52w_ratio is not None:
+            if equity.high_52w_ratio >= 92:
+                score += 1.6
+            elif equity.high_52w_ratio >= 82:
+                score += 0.8
+            elif equity.high_52w_ratio <= 70:
+                score -= 1.0
+
+        if (equity.avg_trading_value_20d or 0.0) >= 20_000_000_000:
+            score += 1.2
+        elif (equity.avg_trading_value_20d or 0.0) >= 10_000_000_000:
+            score += 0.7
+
+        if equity.ownership_flow_score >= 5.0:
+            score += 1.8
+        elif equity.ownership_flow_score <= -5.0:
+            score -= 1.0
+
+        if equity.estimate_revision_score >= 5.0:
+            score += 1.4
+        elif equity.estimate_revision_score <= -3.0:
+            score -= 1.0
+
+        if reference < 3_000_000_000:
+            score -= 2.2
+        elif reference < 10_000_000_000:
+            score -= 1.0
+        if market_cap < 100_000_000_000:
+            score -= 2.0
+        elif market_cap < 300_000_000_000:
+            score -= 1.0
+
+        if "추격주의" in equity.tags and equity.trend_support_score < 3.5:
+            score -= 1.5
+        if "이익생산 약한 섹터" in equity.tags and equity.business_quality_score < 6.5:
+            score -= 1.0
+        if equity.value_trap_risk_score >= 1.5:
+            score -= 1.5
+        if equity.business_quality_score < 5.0:
+            score -= 1.2
+        if equity.cashflow_quality_score < 0:
+            score -= 1.2
+
+        equity.leader_cycle_score = round(score, 2)
+        if score >= 8.5:
+            _add_tag(equity, "Cycle Leader")
+        elif score >= 6.0:
+            _add_tag(equity, "Leader Candidate")
+        elif score <= 1.0 and rel_3m > 0:
+            _add_tag(equity, "Follower")
+
+
 def _matched_tam_themes(equity: EquitySnapshot) -> list[str]:
     label_text = " ".join(
         filter(
@@ -1291,6 +1438,16 @@ def _scale_component(value: float | None, positive_scale: float, negative_scale:
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
 
 
 def _revision_components(equity: EquitySnapshot) -> list[tuple[float, float]]:

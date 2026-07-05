@@ -104,9 +104,11 @@ class EquitySnapshot:
     investability_score: float = 0.0
     trend_support_score: float = 0.0
     missed_leader_score: float = 0.0
+    leader_cycle_score: float = 0.0
     final_score: float = 0.0
     recommendation_bucket: str = "보류"
     core_bucket: str | None = None
+    leader_bucket: str | None = None
     recommendation_reasons: list[str] = field(default_factory=list)
     value_style: str | None = None
     growth_style: str | None = None
@@ -216,9 +218,11 @@ class EquitySnapshot:
             "investability_score": self.investability_score,
             "trend_support_score": self.trend_support_score,
             "missed_leader_score": self.missed_leader_score,
+            "leader_cycle_score": self.leader_cycle_score,
             "final_score": self.final_score,
             "recommendation_bucket": self.recommendation_bucket,
             "core_bucket": self.core_bucket,
+            "leader_bucket": self.leader_bucket,
             "recommendation_reasons": " | ".join(self.recommendation_reasons),
             "value_style": self.value_style,
             "growth_style": self.growth_style,

@@ -55,6 +55,14 @@ def _build_markdown(
     )
     value_core = buy_review[buy_review["core_bucket"].fillna("") == "Value Core"]
     growth_core = buy_review[buy_review["core_bucket"].fillna("") == "Growth Core"]
+    leader_top = working[working["leader_bucket"].fillna("") == "Leader"].sort_values(
+        by=["leader_cycle_score", "returns_3m_pct", "trend_support_score"],
+        ascending=False,
+    )
+    leader_candidate = working[working["leader_bucket"].fillna("") == "Leader Candidate"].sort_values(
+        by=["leader_cycle_score", "estimate_revision_score", "trend_support_score"],
+        ascending=False,
+    )
     small_watch = working[working["recommendation_bucket"] == "소액 관찰"].sort_values(
         by=["final_score", "dividend_potential_score", "cashflow_quality_score"],
         ascending=False,
@@ -106,6 +114,8 @@ def _build_markdown(
         f"- 실매수 검토: {summary['buy_review']} 종목",
         f"- Value Core: {summary['value_core']} 종목",
         f"- Growth Core: {summary['growth_core']} 종목",
+        f"- Cycle Leader: {summary['leader_count']} 종목",
+        f"- Leader Candidate: {summary['leader_candidate_count']} 종목",
         f"- 소액 관찰: {summary['small_watch']} 종목",
         f"- 가치함정 경고: {summary['trap_watch']} 종목",
         f"- Historical cache assists: {summary['cache_rows']} 종목",
@@ -119,6 +129,12 @@ def _build_markdown(
         "",
         "### Growth Core",
         _bullet_summary(growth_core.head(10), score_column="final_score"),
+        "",
+        "### Cycle Leader",
+        _bullet_summary(leader_top.head(10), score_column="leader_cycle_score"),
+        "",
+        "### Leader Candidate",
+        _bullet_summary(leader_candidate.head(10), score_column="leader_cycle_score"),
         "",
         "### 소액 관찰",
         _bullet_summary(small_watch.head(10), score_column="final_score"),
@@ -180,6 +196,14 @@ def _build_html(
     )
     value_core = buy_review[buy_review["core_bucket"].fillna("") == "Value Core"]
     growth_core = buy_review[buy_review["core_bucket"].fillna("") == "Growth Core"]
+    leader_top = working[working["leader_bucket"].fillna("") == "Leader"].sort_values(
+        by=["leader_cycle_score", "returns_3m_pct", "trend_support_score"],
+        ascending=False,
+    )
+    leader_candidate = working[working["leader_bucket"].fillna("") == "Leader Candidate"].sort_values(
+        by=["leader_cycle_score", "estimate_revision_score", "trend_support_score"],
+        ascending=False,
+    )
     small_watch = working[working["recommendation_bucket"] == "소액 관찰"].sort_values(
         by=["final_score", "dividend_potential_score", "cashflow_quality_score"],
         ascending=False,
@@ -233,6 +257,8 @@ def _build_html(
         ("전체 스캔 종목", f"{summary['total']:,}"),
         ("Value Core", f"{summary['value_core']:,}"),
         ("Growth Core", f"{summary['growth_core']:,}"),
+        ("Cycle Leader", f"{summary['leader_count']:,}"),
+        ("Leader Cand.", f"{summary['leader_candidate_count']:,}"),
         ("소액 관찰", f"{summary['small_watch']:,}"),
         ("가치함정 경고", f"{summary['trap_watch']:,}"),
         ("핵심 데이터 부족", f"{summary['core_missing']:,}"),
@@ -242,8 +268,10 @@ def _build_html(
 
     missing_counts = _top_missing_counts(working)
     definitions_html = _bucket_definitions_html()
-    conviction_html = _conviction_grid(pd.concat([value_core.head(2), growth_core.head(2)], ignore_index=True))
+    conviction_html = _conviction_grid(pd.concat([leader_top.head(2), value_core.head(1), growth_core.head(1)], ignore_index=True))
     quick_review = _card_grid(buy_review.head(8), "final_score", accent="value")
+    quick_leader = _card_grid(leader_top.head(8), "leader_cycle_score", accent="growth")
+    quick_leader_candidate = _card_grid(leader_candidate.head(8), "leader_cycle_score", accent="growth")
     quick_watch = _card_grid(small_watch.head(8), "final_score", accent="growth")
     trap_watch_html = _card_grid(trap_watch.head(8), "value_trap_risk_score", accent="growth")
     memo_value_core_html = _memo_grid(value_core.head(5), title="Value Core", tone="value")
@@ -257,13 +285,13 @@ def _build_html(
     growth_speculative_html = _card_grid(growth_speculative, "growth_early_score", accent="growth")
     missed_leader_html = _card_grid(missed_leaders, "missed_leader_score", accent="growth")
     special_watch_html = _html_table(special_dividend_watch, bucket="special_dividend")
-    spotlight_html = _spotlight_strip(value_top, growth_top, missed_leaders)
+    spotlight_html = _spotlight_strip(value_top, growth_top, leader_top)
     universe_json = json.dumps(_records_for_ui(full_list), ensure_ascii=False)
     value_table = _html_table(value_top, bucket="value")
     growth_table = _html_table(growth_top, bucket="growth")
     summary_html = "".join(
         f'<div class="metric-card"><span class="metric-label">{escape(label)}</span><strong>{escape(value)}</strong></div>'
-        for label, value in summary_cards[:4]
+        for label, value in summary_cards[:6]
     )
     missing_html = "".join(
         f'<span class="chip">{escape(name)} {count}</span>' for name, count in missing_counts
@@ -727,7 +755,7 @@ def _build_html(
           <div class="eyebrow">KRX Automated Screening</div>
           <h1>{escape(trading_date.isoformat())}</h1>
           <p>오늘의 결론만 먼저 보이도록 정리했습니다. 상단은 실제 투자 행동 기준으로 묶고, 세부 표와 렌즈는 아래로 접었습니다.</p>
-          <div class="hero-note">먼저 `Value Core`와 `Growth Core`를 보고, 다음으로 `소액 관찰`, 마지막으로 `가치함정 경고`를 확인하면 됩니다. 점수보다 판단 문장과 주의점을 먼저 읽는 구조입니다.</div>
+          <div class="hero-note">먼저 `Cycle Leader`와 `Leader Candidate`를 보고, 그 다음 `Value Core`와 `Growth Core`를 확인하면 됩니다. 점수보다 이번 사이클에서 누가 실제로 앞서가는지 먼저 읽는 구조입니다.</div>
         </div>
       </div>
       <div class="metric-grid">{summary_html}</div>
@@ -764,6 +792,16 @@ def _build_html(
             <span>논리는 있으나 유동성이나 구조상 비중을 크게 싣기 어려운 후보</span>
           </div>
           <div class="card-grid">{quick_watch}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Cycle Leader 카드</h2>
+            <span>이번 사이클에서 실제로 앞서가는 업종/종목 리더</span>
+          </div>
+          <div class="card-grid">{quick_leader}</div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2>Leader Candidate 카드</h2>
+            <span>정배열과 수급, 업종 상대강도가 붙으며 리더로 진입 중인 후보</span>
+          </div>
+          <div class="card-grid">{quick_leader_candidate}</div>
           <div class="section-head" style="margin-top:22px;">
             <h2>가치함정 경고 카드</h2>
             <span>싸 보여도 구조적 할인일 수 있는 후보</span>
@@ -849,6 +887,7 @@ def _build_html(
                   <th>Value Style</th>
                   <th>Growth</th>
                   <th>Growth Style</th>
+                  <th>Leader</th>
                   <th>Core</th>
                   <th>최근반복</th>
                   <th>Stage</th>
@@ -922,6 +961,7 @@ def _build_html(
           <td>${{row.value_style || "-"}}</td>
           <td>${{fmt(row.growth_early_score)}}</td>
           <td>${{row.growth_style || "-"}}</td>
+          <td>${{row.leader_bucket || "-"}}</td>
           <td>${{row.core_bucket || row.recommendation_bucket || "-"}}</td>
           <td>${{fmt(row.repeat_top_count)}}</td>
           <td>${{stageBadge(row.stage)}}</td>
@@ -1009,6 +1049,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("growth_style", ""),
         ("recommendation_bucket", "보류"),
         ("core_bucket", ""),
+        ("leader_bucket", ""),
         ("recommendation_reasons", ""),
         ("repeat_top_count", 0),
         ("source_notes", ""),
@@ -1042,6 +1083,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "investability_score",
         "trend_support_score",
         "missed_leader_score",
+        "leader_cycle_score",
         "final_score",
         "foreign_net_buy_3m",
         "pension_net_buy_3m",
@@ -1122,6 +1164,8 @@ def _summary_metrics(equities: list[EquitySnapshot], working: pd.DataFrame) -> d
     buy_review = int((working["recommendation_bucket"] == "실매수 검토").sum())
     value_core = int((working["core_bucket"].fillna("") == "Value Core").sum()) if "core_bucket" in working.columns else 0
     growth_core = int((working["core_bucket"].fillna("") == "Growth Core").sum()) if "core_bucket" in working.columns else 0
+    leader_count = int((working["leader_bucket"].fillna("") == "Leader").sum()) if "leader_bucket" in working.columns else 0
+    leader_candidate_count = int((working["leader_bucket"].fillna("") == "Leader Candidate").sum()) if "leader_bucket" in working.columns else 0
     small_watch = int((working["recommendation_bucket"] == "소액 관찰").sum())
     trap_watch = int((working["recommendation_bucket"] == "가치함정 경고").sum())
     return {
@@ -1135,6 +1179,8 @@ def _summary_metrics(equities: list[EquitySnapshot], working: pd.DataFrame) -> d
         "buy_review": buy_review,
         "value_core": value_core,
         "growth_core": growth_core,
+        "leader_count": leader_count,
+        "leader_candidate_count": leader_candidate_count,
         "small_watch": small_watch,
         "trap_watch": trap_watch,
     }
@@ -1389,7 +1435,11 @@ def _bullet_summary(frame: pd.DataFrame, score_column: str) -> str:
         tags = getattr(row, "tags", "")
         sector = getattr(row, "sector", "") or getattr(row, "market", "")
         size_bucket = getattr(row, "size_bucket", "")
-        recommendation_bucket = getattr(row, "core_bucket", None) or getattr(row, "recommendation_bucket", "")
+        recommendation_bucket = (
+            getattr(row, "leader_bucket", None)
+            or getattr(row, "core_bucket", None)
+            or getattr(row, "recommendation_bucket", "")
+        )
         score_text = f"{score:.1f}" if pd.notna(score) else "-"
         returns_text = f"{returns_6m:.1f}%" if pd.notna(returns_6m) else "-"
         tag_text = f" / {tags}" if tags else ""
@@ -1498,11 +1548,11 @@ def _memo_grid(frame: pd.DataFrame, title: str, tone: str) -> str:
     """
 
 
-def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, missed_frame: pd.DataFrame) -> str:
+def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, leader_frame: pd.DataFrame) -> str:
     configs = [
         ("Top Value", value_frame, "value", "final_score"),
         ("Top Growth", growth_frame, "growth", "growth_early_score"),
-        ("Missed Leader", missed_frame, "growth", "missed_leader_score"),
+        ("Cycle Leader", leader_frame, "growth", "leader_cycle_score"),
     ]
     cards: list[str] = []
     for label, frame, accent, score_column in configs:
@@ -1537,9 +1587,14 @@ def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, miss
 
 
 def _memo_caution(row: object) -> str:
+    leader_bucket = str(getattr(row, "leader_bucket", "") or "")
     core_bucket = str(getattr(row, "core_bucket", "") or "")
     bucket = str(getattr(row, "recommendation_bucket", "") or "")
     tags = str(getattr(row, "tags", "") or "")
+    if leader_bucket == "Leader":
+        return "이번 사이클에서 업종과 종목 수급이 가장 먼저 붙고 있는 실제 주도주 축입니다."
+    if leader_bucket == "Leader Candidate":
+        return "상대강도와 정배열이 살아 있어 다음 주도주군 진입을 점검할 후보입니다."
     if core_bucket == "Value Core":
         return "싸 보여서가 아니라 실제 사업체력과 현금흐름까지 남은 가치주 후보입니다."
     if core_bucket == "Growth Core":
@@ -1578,6 +1633,8 @@ def _bucket_definitions_markdown() -> str:
     rows = [
         "- `Value Core`: 거래대금 20D 100억 이상, `investability >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`. 저평가 근거와 사업 지속성이 함께 보여야 합니다.",
         "- `Growth Core`: 거래대금 20D 100억 이상, `investability >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`. `Growth Proven`과 추정치/수급/TAM 중 최소 두 축이 확인돼야 합니다.",
+        "- `Cycle Leader`: 최근 3개월 시장 대비 초과수익, 업종 내 상위 상대강도, 정배열, 거래대금, 수급이 동시에 붙는 종목입니다.",
+        "- `Leader Candidate`: 업종은 강하고 정배열/추정치가 살아 있으나, 아직 완전한 리더 확신까지는 아닌 후보입니다.",
         "- `Value Conviction`: `PER <= 20` 또는 `PBR <= 1.5` 또는 업종 할인 20% 이상, 사업체력/현금흐름 양호.",
         "- `Growth Conviction`: `Growth Proven`, `estimate_revision >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`, `stage != 과열`, 고PER면 정당화 태그 필요.",
         "- `정배열 추세`: `종가 >= 20일선 >= 60일선 >= 120일선`이면 `조기매도 경계` 또는 `추세 유지` 태그를 붙여, 가치 해소 뒤에도 추세 지속 여부를 확인합니다.",
@@ -1613,6 +1670,17 @@ def _bucket_definitions_html() -> str:
                 "Growth Proven 필요",
                 "추정치 개선 + TAM/수급 확인",
                 "정배열 유지면 추세 보유 우선",
+            ],
+        ),
+        (
+            "Cycle Leader / Candidate",
+            "이번 사이클에서 누가 실제 선도주인지와, 누가 그 뒤를 따라 리더군에 진입 중인지를 분리합니다.",
+            [
+                "시장 대비 3개월 초과수익",
+                "업종 내 상위 상대강도",
+                "20/60/120일선 정배열",
+                "거래대금과 수급 동반",
+                "Leader와 Candidate 분리",
             ],
         ),
         (
@@ -1676,6 +1744,13 @@ def _recommendation_reasons(row: object) -> list[str]:
         reasons.append("최근 3개월 외국인·연기금 실수급이 강하게 유입되고 있습니다.")
     elif ownership >= 5:
         reasons.append("최근 수급 흐름이 우호적으로 전환되고 있습니다.")
+
+    leader_cycle = getattr(row, "leader_cycle_score", 0) or 0
+    leader_bucket = str(getattr(row, "leader_bucket", "") or "")
+    if leader_bucket == "Leader":
+        reasons.append("이번 사이클에서 시장과 업종을 동시에 앞서는 상대강도를 보이고 있습니다.")
+    elif leader_bucket == "Leader Candidate" and leader_cycle >= 6:
+        reasons.append("업종 리더군으로 진입하는 초기 흐름이 포착됩니다.")
 
     policy = getattr(row, "policy_score", 0) or 0
     if policy >= 8:
@@ -1755,8 +1830,10 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "governance_warning_score",
         "investability_score",
         "missed_leader_score",
+        "leader_cycle_score",
         "recommendation_bucket",
         "core_bucket",
+        "leader_bucket",
         "recommendation_reasons",
         "value_style",
         "growth_style",
