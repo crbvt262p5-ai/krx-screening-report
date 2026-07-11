@@ -7,7 +7,7 @@ import threading
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -36,6 +36,7 @@ class FinanceEnricher:
             max(1, self.settings.dart_max_concurrent)
         )
         self._history_cache = self._load_historical_cache()
+        self._estimate_history = self._load_estimate_history()
         self._fnguide_dns_failures = 0
         self._fnguide_disabled = False
         self._fnguide_lock = threading.Lock()
@@ -55,6 +56,7 @@ class FinanceEnricher:
                     equity.mark_missing("finance_bundle")
 
     def _enrich_one(self, equity: EquitySnapshot, trading_date: date) -> None:
+        self._apply_historical_cache(equity)
         if self.settings.dart_enabled and self.settings.dart_api_key:
             try:
                 self._apply_dart_financials(equity, trading_date)
@@ -74,13 +76,18 @@ class FinanceEnricher:
                     exc,
                 )
                 equity.source_notes.append("dart:unexpected_error")
-        try:
-            self._apply_fnguide_fallback(equity)
-        except requests.RequestException as exc:
-            self.logger.warning("Finance enrich failed for %s %s: %s", equity.ticker, equity.name, exc)
-            equity.mark_missing("finance_bundle")
-        self._apply_historical_cache(equity)
+        if self._has_minimum_finance_bundle(equity):
+            equity.source_notes.append("finance:cache_sufficient")
+        else:
+            try:
+                self._apply_fnguide_fallback(equity)
+            except requests.RequestException as exc:
+                self.logger.warning("Finance enrich failed for %s %s: %s", equity.ticker, equity.name, exc)
+                equity.mark_missing("finance_bundle")
         self._finalize_derived_metrics(equity)
+        self._apply_estimate_revision_history(equity, trading_date)
+        if self._has_minimum_finance_bundle(equity):
+            equity.clear_missing("finance_bundle")
 
     def _apply_dart_financials(self, equity: EquitySnapshot, trading_date: date) -> None:
         with self._dart_semaphore:
@@ -104,6 +111,9 @@ class FinanceEnricher:
             equity.op_income_3y = [row.get("op_income") for row in annuals][-3:]
             equity.net_income_3y = [row.get("net_income") for row in annuals][-3:]
             equity.debt_ratio = annuals[-1].get("debt_ratio") or equity.debt_ratio
+            equity.total_equity = annuals[-1].get("equity") or equity.total_equity
+            equity.total_debt = annuals[-1].get("total_debt") or equity.total_debt
+            equity.ebitda = annuals[-1].get("ebitda") or equity.ebitda
             equity.cash_assets = annuals[-1].get("cash_assets") or equity.cash_assets
             equity.net_cash = annuals[-1].get("net_cash") or equity.net_cash
             equity.fcf = annuals[-1].get("fcf") or equity.fcf
@@ -171,6 +181,12 @@ class FinanceEnricher:
             equity.net_income_3y = parsed.get("net_income_3y", equity.net_income_3y)
             if equity.debt_ratio is None:
                 equity.debt_ratio = parsed.get("debt_ratio")
+            if equity.total_equity is None:
+                equity.total_equity = parsed.get("equity")
+            if equity.total_debt is None:
+                equity.total_debt = parsed.get("total_debt")
+            if equity.ebitda is None:
+                equity.ebitda = parsed.get("ebitda")
 
         parsed_dividends = _parse_dividend_history(tables)
         if parsed_dividends and not equity.dividends_3y:
@@ -179,6 +195,13 @@ class FinanceEnricher:
         consensus_growth = _parse_consensus_growth(tables)
         if equity.forecast_growth_next_year is None:
             equity.forecast_growth_next_year = consensus_growth
+        consensus_estimates = _parse_consensus_estimates(tables)
+        if equity.consensus_op_income_estimate is None:
+            equity.consensus_op_income_estimate = consensus_estimates.get("op_income")
+        if equity.consensus_net_income_estimate is None:
+            equity.consensus_net_income_estimate = consensus_estimates.get("net_income")
+        if equity.consensus_eps_estimate is None:
+            equity.consensus_eps_estimate = consensus_estimates.get("eps")
 
         ratio_block = _parse_ratio_block(soup)
         if equity.payout_ratio is None:
@@ -223,8 +246,16 @@ class FinanceEnricher:
             "cash_assets": "cash_assets",
             "net_cash": "net_cash",
             "fcf": "fcf",
+            "fcf_yield_pct": "fcf_yield",
+            "ev_ebitda": "ev_ebitda",
+            "roe_pct": "roe",
+            "roic_pct": "roic",
             "payout_ratio_pct": "payout_ratio",
+            "dividend_growth_rate_pct": "dividend_growth_rate",
             "forecast_growth_next_year_pct": "forecast_growth_next_year",
+            "total_equity": "total_equity",
+            "total_debt": "total_debt",
+            "ebitda": "ebitda",
         }
         for csv_field, attr in scalar_fields.items():
             if getattr(equity, attr) is None:
@@ -281,7 +312,11 @@ class FinanceEnricher:
 
     def _load_historical_cache(self) -> dict[str, dict[str, str]]:
         data_dir = Path(self.settings.data_dir)
-        files = sorted(data_dir.glob("screened_*.csv"), reverse=True)
+        files: list[Path] = []
+        latest_csv = data_dir / "latest.csv"
+        if latest_csv.exists():
+            files.append(latest_csv)
+        files.extend(sorted(data_dir.glob("screened_*.csv"), reverse=True))
         cache: dict[str, dict[str, str]] = {}
         for path in files:
             try:
@@ -292,9 +327,26 @@ class FinanceEnricher:
                 ticker = str(row.get("ticker") or "").strip()
                 if ticker and ticker not in cache:
                     cache[ticker] = row
-            if len(cache) >= 2500:
-                break
         return cache
+
+    def _load_estimate_history(self) -> dict[str, list[tuple[date, dict[str, str]]]]:
+        data_dir = Path(self.settings.data_dir)
+        files = sorted(data_dir.glob("screened_*.csv"), reverse=True)
+        history: dict[str, list[tuple[date, dict[str, str]]]] = {}
+        for path in files:
+            trading_date = _extract_trading_date(path.name)
+            if trading_date is None:
+                continue
+            try:
+                frame = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
+            except Exception:  # pragma: no cover
+                continue
+            for row in frame.to_dict(orient="records"):
+                ticker = str(row.get("ticker") or "").strip()
+                if not ticker:
+                    continue
+                history.setdefault(ticker, []).append((trading_date, row))
+        return history
 
     def _request_with_retries(self, url: str, attempts: int = 3) -> requests.Response:
         last_error: Exception | None = None
@@ -314,10 +366,26 @@ class FinanceEnricher:
     def _read_html_tables(self, html: str) -> list[pd.DataFrame]:
         try:
             return pd.read_html(io.StringIO(html), flavor=["lxml"])
-        except ValueError:
-            return []
+        except (ValueError, IndexError):
+            pass
         except ImportError:
-            return pd.read_html(io.StringIO(html))
+            try:
+                return pd.read_html(io.StringIO(html))
+            except (ValueError, IndexError):
+                pass
+
+        tables: list[pd.DataFrame] = []
+        soup = BeautifulSoup(html, "lxml")
+        for table_tag in soup.find_all("table"):
+            try:
+                parsed = pd.read_html(io.StringIO(str(table_tag)), flavor=["lxml"])
+            except (ValueError, IndexError, ImportError):
+                try:
+                    parsed = pd.read_html(io.StringIO(str(table_tag)))
+                except Exception:
+                    continue
+            tables.extend(parsed)
+        return tables
 
     def _finalize_derived_metrics(self, equity: EquitySnapshot) -> None:
         equity.sector = _clean_business_label(equity.sector) if equity.sector else None
@@ -349,6 +417,7 @@ class FinanceEnricher:
             equity.clear_missing("dividends_3y")
 
         self._reconcile_dividend_yield(equity)
+        self._derive_capital_metrics(equity)
 
         if equity.op_income_3y and len(equity.op_income_3y) >= 2:
             series = pd.Series([v for v in equity.op_income_3y if v is not None and v != 0])
@@ -361,10 +430,83 @@ class FinanceEnricher:
         if equity.market_cap is not None:
             equity.size_bucket = _classify_size_bucket(equity.market_cap)
 
+    def _derive_capital_metrics(self, equity: EquitySnapshot) -> None:
+        latest_net_income = next((value for value in reversed(equity.net_income_3y) if value is not None), None)
+        latest_op_income = next((value for value in reversed(equity.op_income_3y) if value is not None), None)
+
+        if equity.market_cap not in (None, 0) and equity.fcf is not None:
+            equity.fcf_yield = round((equity.fcf / equity.market_cap) * 100, 2)
+
+        enterprise_value = None
+        if equity.market_cap is not None:
+            total_debt = equity.total_debt or 0.0
+            cash_assets = equity.cash_assets or 0.0
+            enterprise_value = equity.market_cap + total_debt - cash_assets
+            if enterprise_value < 0:
+                enterprise_value = 0.0
+
+        if enterprise_value not in (None, 0) and equity.ebitda not in (None, 0):
+            equity.ev_ebitda = round(enterprise_value / equity.ebitda, 2)
+
+        if equity.per not in (None, 0) and (equity.forecast_growth_next_year or 0) > 0:
+            equity.peg = round(equity.per / equity.forecast_growth_next_year, 2)
+
+        if latest_net_income not in (None, 0) and equity.total_equity not in (None, 0):
+            equity.roe = round((latest_net_income / equity.total_equity) * 100, 2)
+
+        invested_capital = None
+        if equity.total_equity is not None:
+            invested_capital = equity.total_equity + (equity.total_debt or 0.0) - (equity.cash_assets or 0.0)
+        if latest_op_income not in (None, 0) and invested_capital not in (None, 0):
+            equity.roic = round((latest_op_income / invested_capital) * 100, 2)
+
+    def _apply_estimate_revision_history(self, equity: EquitySnapshot, trading_date: date) -> None:
+        history_rows = self._estimate_history.get(equity.ticker, [])
+        if not history_rows:
+            equity.mark_missing("eps_revision_score")
+            return
+
+        current_values = {
+            "op_income": equity.consensus_op_income_estimate,
+            "net_income": equity.consensus_net_income_estimate,
+            "eps": equity.consensus_eps_estimate,
+        }
+        horizons = {
+            "3m": 90,
+            "6m": 180,
+            "12m": 365,
+        }
+        any_applied = False
+
+        for label, days in horizons.items():
+            target = trading_date - timedelta(days=days)
+            historical = _find_historical_row(history_rows, target)
+            if historical is None:
+                continue
+            _, row = historical
+            previous_values = {
+                "op_income": _parse_amount(row.get("consensus_op_income_estimate")),
+                "net_income": _parse_amount(row.get("consensus_net_income_estimate")),
+                "eps": _parse_amount(row.get("consensus_eps_estimate")),
+            }
+            for metric, current_value in current_values.items():
+                previous_value = previous_values.get(metric)
+                change = _pct_change(previous_value, current_value)
+                if change is None:
+                    continue
+                setattr(equity, f"{metric}_revision_{label}_pct", change)
+                any_applied = True
+
+        if any_applied:
+            equity.clear_missing("eps_revision_score")
+        else:
+            equity.mark_missing("eps_revision_score")
+
     def _reconcile_dividend_yield(self, equity: EquitySnapshot) -> None:
         non_zero_dividends = [value for value in equity.dividends_3y if value not in (None, 0)]
         trailing_dps = non_zero_dividends[-1] if non_zero_dividends else None
         normalized_dps = _normalized_dividend_dps(non_zero_dividends)
+        equity.special_dividend_adjusted = normalized_dps is not None and trailing_dps is not None and trailing_dps != normalized_dps
 
         computed_trailing = None
         computed_normalized = None
@@ -406,6 +548,40 @@ class FinanceEnricher:
             equity.clear_missing("dividend_yield")
         else:
             equity.mark_missing("dividend_yield")
+
+        if len(non_zero_dividends) >= 2:
+            prev = non_zero_dividends[0]
+            latest = non_zero_dividends[-1]
+            if prev not in (None, 0) and latest is not None:
+                equity.dividend_growth_rate = round(((latest / prev) - 1) * 100, 2)
+            equity.dividend_cut_flag = any(
+                later < earlier
+                for earlier, later in zip(non_zero_dividends, non_zero_dividends[1:])
+            )
+        else:
+            equity.dividend_cut_flag = False
+
+        if (
+            equity.dividend_growth_rate is not None
+            and equity.dividend_growth_rate > 0
+            and equity.payout_ratio is not None
+            and equity.payout_ratio >= 15
+        ):
+            equity.payout_increase_flag = True
+
+    def _has_minimum_finance_bundle(self, equity: EquitySnapshot) -> bool:
+        return (
+            equity.per is not None
+            and equity.pbr is not None
+            and (
+                equity.dividend_yield is not None
+                or equity.dividend_yield_trailing is not None
+                or equity.dividend_yield_normalized is not None
+            )
+            and bool(equity.sales_3y)
+            and bool(equity.op_income_3y)
+            and bool(equity.net_income_3y)
+        )
 
     def _get_corp_code(self, ticker: str) -> str | None:
         if self._corp_code_map is None:
@@ -500,6 +676,7 @@ class FinanceEnricher:
         short_fin = _first_value(lookup, ["단기금융상품", "기타유동금융자산"])
         borrowings = _first_value(lookup, ["단기차입금", "장기차입금", "사채"])
         cfo = _first_value(lookup, ["영업활동으로인한현금흐름"])
+        ebitda = _first_value(lookup, ["EBITDA"])
         capex = sum(
             abs(v)
             for v in (
@@ -519,6 +696,9 @@ class FinanceEnricher:
             "op_income": op_income,
             "net_income": net_income,
             "debt_ratio": debt_ratio,
+            "equity": equity,
+            "total_debt": borrowings,
+            "ebitda": ebitda,
             "cash_assets": cash_assets,
             "net_cash": net_cash,
             "fcf": fcf,
@@ -547,7 +727,12 @@ def _parse_annual_financials(tables: list[pd.DataFrame]) -> dict[str, list[float
     latest_col = cols[-1]
     liabilities = _lookup_metric_value(annual, ["부채총계"], latest_col)
     equity = _lookup_metric_value(annual, ["자본총계"], latest_col)
+    total_debt = _lookup_metric_value(annual, ["차입금", "순차입금", "총차입금"], latest_col)
+    ebitda = _lookup_metric_value(annual, ["EBITDA"], latest_col)
     parsed["debt_ratio"] = round((liabilities / equity) * 100, 2) if liabilities not in (None, 0) and equity not in (None, 0) else None
+    parsed["equity"] = equity
+    parsed["total_debt"] = total_debt
+    parsed["ebitda"] = ebitda
     return parsed
 
 
@@ -579,6 +764,34 @@ def _parse_consensus_growth(tables: list[pd.DataFrame]) -> float | None:
         if base not in (None, 0) and est is not None:
             return round(((est / base) - 1) * 100, 2)
     return None
+
+
+def _parse_consensus_estimates(tables: list[pd.DataFrame]) -> dict[str, float | None]:
+    estimates = {
+        "op_income": None,
+        "net_income": None,
+        "eps": None,
+    }
+    for table in tables:
+        normalized = _normalize_financial_table(table)
+        if normalized.empty:
+            continue
+        estimate_cols = _estimate_annual_columns(normalized.columns)
+        if not estimate_cols:
+            continue
+        est_col = estimate_cols[0]
+        estimates["op_income"] = estimates["op_income"] or _lookup_metric_value(
+            normalized, ["영업이익"], est_col
+        )
+        estimates["net_income"] = estimates["net_income"] or _lookup_metric_value(
+            normalized, ["지배주주순이익", "당기순이익"], est_col
+        )
+        estimates["eps"] = estimates["eps"] or _lookup_metric_value(
+            normalized, ["EPS", "EPS(원)", "수정EPS"], est_col
+        )
+        if any(value is not None for value in estimates.values()):
+            break
+    return estimates
 
 
 def _parse_snapshot_table(tables: list[pd.DataFrame]) -> dict[str, float | None]:
@@ -788,18 +1001,21 @@ def _normalize_financial_table(table: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     working = table.copy()
+    if working.shape[1] == 0:
+        return pd.DataFrame()
     if isinstance(working.columns, pd.MultiIndex):
         renamed_columns = []
         for index, column in enumerate(working.columns):
             if index == 0:
                 renamed_columns.append("metric")
                 continue
-            top = str(column[0]).strip()
-            bottom = str(column[1]).strip()
+            parts = list(column) if isinstance(column, tuple) else [column]
+            top = str(parts[0]).strip() if len(parts) >= 1 else ""
+            bottom = str(parts[1]).strip() if len(parts) >= 2 else ""
             if top in {"Annual", "Net Quarter"}:
-                renamed_columns.append(f"{top}:{bottom}")
+                renamed_columns.append(f"{top}:{bottom}" if bottom else top)
             else:
-                renamed_columns.append(f"{top}_{bottom}")
+                renamed_columns.append(f"{top}_{bottom}".strip("_"))
         working.columns = renamed_columns
     else:
         working.columns = [str(col).strip() for col in working.columns]
@@ -857,6 +1073,33 @@ def _parse_pipe_numbers(value: str) -> list[float | None]:
         return []
     parsed = [_parse_amount(part) for part in str(value).split("|")]
     return parsed if any(item is not None for item in parsed) else []
+
+
+def _extract_trading_date(filename: str) -> date | None:
+    match = re.search(r"screened_(\d{4}-\d{2}-\d{2})\.csv$", filename)
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def _find_historical_row(
+    history_rows: list[tuple[date, dict[str, str]]],
+    target_date: date,
+) -> tuple[date, dict[str, str]] | None:
+    eligible = [item for item in history_rows if item[0] <= target_date]
+    if not eligible:
+        return None
+    eligible.sort(key=lambda item: item[0], reverse=True)
+    return eligible[0]
+
+
+def _pct_change(previous: float | None, current: float | None) -> float | None:
+    if previous in (None, 0) or current is None:
+        return None
+    return round(((current / previous) - 1) * 100, 2)
 
 
 def _is_dns_resolution_error(exc: requests.RequestException) -> bool:

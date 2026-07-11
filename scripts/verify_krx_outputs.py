@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from krx_screening.output_health import assess_output_health
+
 
 REQUIRED_COLUMNS = {
     "ticker",
@@ -21,7 +26,7 @@ REQUIRED_COLUMNS = {
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
     data_dir = root / "data"
     reports_dir = root / "reports"
 
@@ -48,8 +53,11 @@ def main() -> int:
         return 1
 
     row_count = len(frame)
+    health = assess_output_health(frame)
     if row_count < 2000:
         hard_failures.append(f"row_count_too_small:{row_count}")
+    if not health.publishable:
+        hard_failures.append(f"latest_health_failed:{health.reason}")
 
     missing_prev_close = int(frame["prev_close"].isna().sum())
     missing_scores = int(frame["value_score"].isna().sum() + frame["growth_early_score"].isna().sum())
@@ -78,6 +86,17 @@ def _print_result(
     if frame is not None:
         print(f"- rows: {len(frame)}")
         print(f"- latest ticker sample: {', '.join(frame['ticker'].astype(str).head(5).tolist())}")
+        health = assess_output_health(frame)
+        print(
+            "- health:"
+            f" publishable={health.publishable}"
+            f", reason={health.reason}"
+            f", buy={health.buy_review_count}"
+            f", core={health.core_count}"
+            f", per_cov={health.per_coverage:.2f}"
+            f", pbr_cov={health.pbr_coverage:.2f}"
+            f", sales_cov={health.sales_coverage:.2f}"
+        )
     print(f"- hard_failures: {', '.join(hard_failures) if hard_failures else 'none'}")
     print(f"- warnings: {', '.join(warnings) if warnings else 'none'}")
 

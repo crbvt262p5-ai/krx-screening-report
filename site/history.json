@@ -1,10 +1,31 @@
 [
   {
+    "date": "2026-07-07",
+    "html": "reports/daily_2026-07-07.html",
+    "markdown": "reports/daily_2026-07-07.md",
+    "csv": "data/screened_2026-07-07.csv",
+    "latest": true
+  },
+  {
+    "date": "2026-07-05",
+    "html": "reports/daily_2026-07-05.html",
+    "markdown": "reports/daily_2026-07-05.md",
+    "csv": "data/screened_2026-07-05.csv",
+    "latest": false
+  },
+  {
     "date": "2026-07-04",
     "html": "reports/daily_2026-07-04.html",
     "markdown": "reports/daily_2026-07-04.md",
     "csv": "data/screened_2026-07-04.csv",
-    "latest": true
+    "latest": false
+  },
+  {
+    "date": "2026-07-03",
+    "html": "reports/daily_2026-07-03.html",
+    "markdown": "reports/daily_2026-07-03.md",
+    "csv": "data/screened_2026-07-03.csv",
+    "latest": false
   },
   {
     "date": "2026-06-20",

@@ -38,10 +38,14 @@ def run_screening() -> tuple[str, str]:
     logger.info("News enrichment finished")
 
     score_equities(market_bundle.equities)
-    md_path, csv_path = write_outputs(
+    md_path, csv_path, latest_updated = write_outputs(
         settings,
         market_bundle.trading_date,
         market_bundle.equities,
     )
     logger.info("Outputs written: %s and %s", md_path, csv_path)
+    if latest_updated:
+        logger.info("Latest outputs updated")
+    else:
+        logger.warning("Latest outputs preserved because this run failed health checks")
     return md_path, csv_path

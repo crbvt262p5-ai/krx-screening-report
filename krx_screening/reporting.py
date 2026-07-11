@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from html import escape
 
@@ -8,9 +9,36 @@ import pandas as pd
 
 from .config import Settings
 from .models import EquitySnapshot
+from .output_health import assess_output_health
+
+LOW_QUALITY_ISSUE_PATTERNS = (
+    "AI주식상승확률분석",
+    "AI가 분석해주는",
+    "주가 전망",
+    "밀릴때마다",
+    "저점을 줄때마다",
+    "물량 모아둘 기회",
+    "이후 전망 및 대응전략",
+    "네이버 블로그",
+    "투자분석",
+    "Sonia Citron",
+    "gVhDYuEzku",
+    "주식민원처리반",
+)
+
+LOW_QUALITY_ISSUE_REGEXES = (
+    re.compile(r"^\[[^\]]*시그널\]"),
+    re.compile(r"상승확률"),
+    re.compile(r"적정주가"),
+    re.compile(r"상한가가 고점 신호"),
+)
 
 
-def write_outputs(settings: Settings, trading_date: date, equities: list[EquitySnapshot]) -> tuple[str, str]:
+def write_outputs(
+    settings: Settings,
+    trading_date: date,
+    equities: list[EquitySnapshot],
+) -> tuple[str, str, bool]:
     settings.ensure_directories()
     csv_path = settings.data_dir / f"screened_{trading_date.isoformat()}.csv"
     md_path = settings.reports_dir / f"daily_{trading_date.isoformat()}.md"
@@ -23,21 +51,23 @@ def write_outputs(settings: Settings, trading_date: date, equities: list[EquityS
         by=["final_score", "estimate_revision_score", "tam_expansion_score", "value_score"],
         ascending=False,
     )
+    health = assess_output_health(frame)
     frame.to_csv(csv_path, index=False, encoding="utf-8-sig")
-    frame.to_csv(latest_csv_path, index=False, encoding="utf-8-sig")
 
     markdown = _build_markdown(settings, trading_date, equities, frame)
     html = _build_html(settings, trading_date, equities, frame)
     with md_path.open("w", encoding="utf-8") as handle:
         handle.write(markdown)
-    with latest_md_path.open("w", encoding="utf-8") as handle:
-        handle.write(markdown)
     with html_path.open("w", encoding="utf-8") as handle:
         handle.write(html)
-    with latest_html_path.open("w", encoding="utf-8") as handle:
-        handle.write(html)
+    if health.publishable:
+        frame.to_csv(latest_csv_path, index=False, encoding="utf-8-sig")
+        with latest_md_path.open("w", encoding="utf-8") as handle:
+            handle.write(markdown)
+        with latest_html_path.open("w", encoding="utf-8") as handle:
+            handle.write(html)
 
-    return str(md_path), str(csv_path)
+    return str(md_path), str(csv_path), health.publishable
 
 
 def _build_markdown(
@@ -101,6 +131,7 @@ def _build_markdown(
         by=["missed_leader_score", "final_score", "estimate_revision_score"],
         ascending=False,
     ).head(12)
+    issue_focus = _issue_focus_rows(working, limit=12)
     special_dividend_watch = _special_dividend_watchlist(working, limit=12)
 
     parts = [
@@ -141,6 +172,9 @@ def _build_markdown(
         "",
         "### 가치함정 경고",
         _bullet_summary(trap_watch.head(10), score_column="value_trap_risk_score"),
+        "",
+        "## Today's Important Issues",
+        _issue_digest_markdown(issue_focus),
         "",
         "## Value Lenses",
         "### Deep Value",
@@ -242,6 +276,7 @@ def _build_html(
         by=["missed_leader_score", "final_score", "estimate_revision_score"],
         ascending=False,
     ).head(8)
+    issue_focus = _issue_focus_rows(working, limit=8)
     special_dividend_watch = _special_dividend_watchlist(working, limit=12)
     full_list = _rank_for_explorer(
         working[
@@ -284,6 +319,7 @@ def _build_html(
     growth_proven_html = _card_grid(growth_proven, "growth_early_score", accent="growth")
     growth_speculative_html = _card_grid(growth_speculative, "growth_early_score", accent="growth")
     missed_leader_html = _card_grid(missed_leaders, "missed_leader_score", accent="growth")
+    issue_focus_html = _issue_digest_html(issue_focus)
     special_watch_html = _html_table(special_dividend_watch, bucket="special_dividend")
     spotlight_html = _spotlight_strip(value_top, growth_top, leader_top)
     universe_json = json.dumps(_records_for_ui(full_list), ensure_ascii=False)
@@ -655,6 +691,14 @@ def _build_html(
       gap: 8px;
       margin-top: 14px;
     }}
+    .issue-line {{
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      border-top: 1px dashed rgba(44, 36, 27, 0.10);
+      padding-top: 10px;
+    }}
     .chip {{
       display: inline-flex;
       padding: 6px 10px;
@@ -774,6 +818,11 @@ def _build_html(
         {memo_watch_html}
         {memo_trap_html}
       </div>
+      <div class="section-head" style="margin-top:22px;">
+        <h2>오늘의 중요 이슈</h2>
+        <span>뉴스와 공시에서 실제 종목명 기준으로 걸러낸 핵심 변화</span>
+      </div>
+      <div class="card-grid">{issue_focus_html}</div>
       <details class="fold">
         <summary>세부 데이터와 렌즈 더 보기</summary>
         <div class="fold-body">
@@ -983,7 +1032,7 @@ def _build_html(
 
 def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     working = frame.copy()
-    for column, default in (
+    defaults = (
         ("sector", ""),
         ("industry", ""),
         ("size_bucket", ""),
@@ -1007,6 +1056,17 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("trend_support_score", 0),
         ("missed_leader_score", 0),
         ("final_score", 0),
+        ("important_news_items", ""),
+        ("important_disclosures", ""),
+        ("recommendation_bucket", ""),
+        ("core_bucket", ""),
+        ("leader_bucket", ""),
+        ("recommendation_reasons", ""),
+        ("value_style", ""),
+        ("growth_style", ""),
+        ("tags", ""),
+        ("missing_data", ""),
+        ("source_notes", ""),
         ("foreign_net_buy_3m", 0),
         ("pension_net_buy_3m", 0),
         ("etf_holding_change_3m", 0),
@@ -1055,9 +1115,15 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("source_notes", ""),
         ("missing_data", ""),
         ("tags", ""),
-    ):
+    )
+    for column, default in defaults:
         if column not in working.columns:
             working[column] = default
+        elif isinstance(default, str):
+            working[column] = working[column].fillna("").astype(str)
+            working.loc[working[column].str.lower() == "nan", column] = ""
+        elif isinstance(default, bool):
+            working[column] = working[column].fillna(False)
     for column in (
         "value_score",
         "growth_early_score",
@@ -1435,18 +1501,33 @@ def _bullet_summary(frame: pd.DataFrame, score_column: str) -> str:
         tags = getattr(row, "tags", "")
         sector = getattr(row, "sector", "") or getattr(row, "market", "")
         size_bucket = getattr(row, "size_bucket", "")
-        recommendation_bucket = (
-            getattr(row, "leader_bucket", None)
-            or getattr(row, "core_bucket", None)
-            or getattr(row, "recommendation_bucket", "")
-        )
+        recommendation_bucket = _bucket_label(row)
         score_text = f"{score:.1f}" if pd.notna(score) else "-"
         returns_text = f"{returns_6m:.1f}%" if pd.notna(returns_6m) else "-"
         tag_text = f" / {tags}" if tags else ""
+        issue_text = _issue_summary(row)
+        issue_suffix = f" / {issue_text}" if issue_text else ""
         lines.append(
-            f"- {row.name} ({row.ticker}) [{sector} {size_bucket}] {recommendation_bucket} / score {score_text}, 6M {returns_text}, stage {stage}{tag_text}"
+            f"- {row.name} ({row.ticker}) [{sector} {size_bucket}] {recommendation_bucket} / score {score_text}, 6M {returns_text}, stage {stage}{tag_text}{issue_suffix}"
         )
     return "\n".join(lines)
+
+
+def _issue_digest_markdown(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "_No important issues_"
+
+    lines = []
+    for row in frame.itertuples(index=False):
+        issue_text = _issue_summary(row)
+        if not issue_text:
+            continue
+        score_text = _fmt_cell(getattr(row, "final_score", None))
+        bucket_text = _bucket_label(row)
+        lines.append(
+            f"- {row.name} ({row.ticker}) [{bucket_text}] score {score_text}: {issue_text}"
+        )
+    return "\n".join(lines) if lines else "_No important issues_"
 
 
 def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
@@ -1460,6 +1541,7 @@ def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
         trailing_text = f"{trailing:.2f}%" if pd.notna(trailing) else "-"
         normalized_text = f"{normalized:.2f}%" if pd.notna(normalized) else "-"
         div_text = f"{trailing_text} / {normalized_text}"
+        issue_text = _issue_summary(row)
         cards.append(
             f"""
             <article class="pick-card {accent}">
@@ -1478,10 +1560,40 @@ def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
                 <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
                 {f'<span class="chip">{escape(str(getattr(row, "tags", "")))}</span>' if getattr(row, "tags", "") else ""}
               </div>
+              {f'<div class="issue-line"><strong>이슈</strong> {escape(issue_text)}</div>' if issue_text else ""}
             </article>
             """
         )
     return "".join(cards)
+
+
+def _issue_digest_html(frame: pd.DataFrame) -> str:
+    cards: list[str] = []
+    for row in frame.itertuples(index=False):
+        issue_text = _issue_summary(row)
+        if not issue_text:
+            continue
+        accent = "growth" if (getattr(row, "growth_early_score", 0) or 0) >= (getattr(row, "value_score", 0) or 0) else "value"
+        returns_6m = getattr(row, "returns_6m_pct", None)
+        returns_text = f"{returns_6m:.1f}%" if pd.notna(returns_6m) else "-"
+        bucket_text = _bucket_label(row)
+        cards.append(
+            f"""
+            <article class="pick-card {accent}">
+              <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
+              <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
+              <span class="score-badge {accent}">{escape(bucket_text)}</span>
+              <div class="meta">
+                <div><strong>업종</strong><br>{escape(_fmt_cell(getattr(row, 'sector', None)))}</div>
+                <div><strong>Stage</strong><br>{escape(str(getattr(row, 'stage', '-') or '-'))}</div>
+                <div><strong>최종점수</strong><br>{escape(_fmt_cell(getattr(row, 'final_score', None)))}</div>
+                <div><strong>6M</strong><br>{escape(returns_text)}</div>
+              </div>
+              <div class="issue-line"><strong>이슈</strong> {escape(issue_text)}</div>
+            </article>
+            """
+        )
+    return "".join(cards) if cards else "<div class='subtle'>오늘 포착된 중요 이슈가 없습니다.</div>"
 
 
 def _conviction_grid(frame: pd.DataFrame) -> str:
@@ -1523,17 +1635,20 @@ def _memo_grid(frame: pd.DataFrame, title: str, tone: str) -> str:
         reasons = _recommendation_reasons(row)[:2]
         caution = _memo_caution(row)
         metric_line = _bucket_metric_line(row)
+        issue_text = _issue_summary(row)
+        bucket_text = _bucket_label(row)
         cards.append(
             f"""
             <article class="memo-card">
               <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
               <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
               <div class="chip-row">
-                <span class="score-badge {'value' if tone == 'value' else 'growth'}">{escape(str(getattr(row, 'core_bucket', None) or getattr(row, 'recommendation_bucket', '-') or '-'))}</span>
+                <span class="score-badge {'value' if tone == 'value' else 'growth'}">{escape(bucket_text)}</span>
                 <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
               </div>
               <div class="memo-summary">{escape(caution)}</div>
               <div class="memo-summary">{escape(metric_line)}</div>
+              {f'<div class="memo-summary">중요 이슈: {escape(issue_text)}</div>' if issue_text else ''}
               <ul class="memo-points">{''.join(f'<li>{escape(reason)}</li>' for reason in reasons)}</ul>
             </article>
             """
@@ -1569,6 +1684,7 @@ def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, lead
             continue
         row = next(frame.itertuples(index=False))
         reasons = _recommendation_reasons(row)
+        issue_text = _issue_summary(row)
         cards.append(
             f"""
             <article class="spotlight-card {accent}">
@@ -1580,6 +1696,7 @@ def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, lead
                 <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
               </div>
               <div class="spotlight-line">{escape(reasons[0])}</div>
+              {f'<div class="spotlight-line">{escape(issue_text)}</div>' if issue_text else ''}
             </article>
             """
         )
@@ -1835,6 +1952,8 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "core_bucket",
         "leader_bucket",
         "recommendation_reasons",
+        "important_news_items",
+        "important_disclosures",
         "value_style",
         "growth_style",
         "stage",
@@ -1842,7 +1961,90 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "missing_data",
         "repeat_top_count",
     ]
-    return frame[columns].to_dict(orient="records")
+    return frame.reindex(columns=columns, fill_value="").to_dict(orient="records")
+
+
+def _issue_focus_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    working = frame.copy()
+    if "important_news_items" not in working.columns:
+        working["important_news_items"] = ""
+    if "important_disclosures" not in working.columns:
+        working["important_disclosures"] = ""
+
+    working["issue_count"] = (
+        working["important_news_items"].fillna("").astype(str).apply(lambda value: len(_split_issue_values(value)))
+        + working["important_disclosures"].fillna("").astype(str).apply(lambda value: len(_split_issue_values(value)))
+    )
+    working = working[(working["issue_count"] > 0)].copy()
+    if working.empty:
+        return working
+    working["is_actionable_issue"] = (
+        (~working["excluded"])
+        | (working["core_bucket"].fillna("") != "")
+        | (working["leader_bucket"].fillna("").isin(["Leader", "Leader Candidate"]))
+    )
+    return working.sort_values(
+        by=["is_actionable_issue", "issue_count", "final_score", "estimate_revision_score", "returns_3m_pct"],
+        ascending=False,
+    ).head(limit)
+
+
+def _issue_summary(row: object) -> str:
+    news = _split_issue_values(getattr(row, "important_news_items", ""))
+    disclosures = _split_issue_values(getattr(row, "important_disclosures", ""))
+    parts: list[str] = []
+    if disclosures:
+        parts.append(f"공시 {', '.join(disclosures[:2])}")
+    if news:
+        parts.append(f"뉴스 {', '.join(news[:2])}")
+    return " / ".join(parts)
+
+
+def _bucket_label(row: object) -> str:
+    for field in ("core_bucket", "leader_bucket", "recommendation_bucket"):
+        value = getattr(row, field, None)
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        text = str(value).strip()
+        if not text or text.lower() == "nan":
+            continue
+        return text
+    return "-"
+
+
+def _split_issue_values(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(" | ") if part.strip()]
+        return _filter_issue_parts(parts)
+    if isinstance(value, list):
+        parts = [str(part).strip() for part in value if str(part).strip()]
+        return _filter_issue_parts(parts)
+    return []
+
+
+def _filter_issue_parts(parts: list[str]) -> list[str]:
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        if _is_low_quality_issue(part):
+            continue
+        if part in seen:
+            continue
+        seen.add(part)
+        filtered.append(part)
+    return filtered
+
+
+def _is_low_quality_issue(text: str) -> bool:
+    if not text:
+        return True
+    if any(pattern in text for pattern in LOW_QUALITY_ISSUE_PATTERNS):
+        return True
+    return any(regex.search(text) for regex in LOW_QUALITY_ISSUE_REGEXES)
 
 
 def _special_dividend_watchlist(frame: pd.DataFrame, limit: int) -> pd.DataFrame:

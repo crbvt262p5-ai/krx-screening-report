@@ -80,6 +80,8 @@ class EquitySnapshot:
     eps_revision_6m_pct: float | None = None
     eps_revision_12m_pct: float | None = None
     news_keyword_hits: list[str] = field(default_factory=list)
+    important_news_items: list[str] = field(default_factory=list)
+    important_disclosures: list[str] = field(default_factory=list)
     missing_data: list[str] = field(default_factory=list)
     source_notes: list[str] = field(default_factory=list)
     excluded: bool = False
@@ -199,6 +201,8 @@ class EquitySnapshot:
             "eps_revision_6m_pct": self.eps_revision_6m_pct,
             "eps_revision_12m_pct": self.eps_revision_12m_pct,
             "news_keyword_hits": "|".join(self.news_keyword_hits),
+            "important_news_items": " | ".join(self.important_news_items),
+            "important_disclosures": " | ".join(self.important_disclosures),
             "value_score": self.value_score,
             "growth_early_score": self.growth_early_score,
             "dividend_potential_score": self.dividend_potential_score,

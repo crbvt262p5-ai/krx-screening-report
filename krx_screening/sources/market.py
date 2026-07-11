@@ -110,7 +110,11 @@ def enrich_with_price_history(
     equities: list[EquitySnapshot], trading_date: date, logger: logging.Logger
 ) -> None:
     start_date = trading_date - timedelta(days=430)
+    history_cache = _load_historical_market_cache()
     for equity in equities:
+        _apply_historical_market_cache(equity, history_cache.get(equity.ticker))
+        if _has_minimum_price_bundle(equity):
+            continue
         hist = _load_price_history(equity.ticker, start_date, trading_date, logger)
         if hist.empty or "Close" not in hist.columns:
             equity.mark_missing("price_history")
@@ -158,6 +162,84 @@ def enrich_with_price_history(
             equity.mark_missing("avg_trading_value_20d")
         if equity.avg_trading_value_60d is None:
             equity.mark_missing("avg_trading_value_60d")
+
+
+def _load_historical_market_cache() -> dict[str, dict[str, str]]:
+    data_dir = Path.cwd() / "data"
+    files: list[Path] = []
+    latest_csv = data_dir / "latest.csv"
+    if latest_csv.exists():
+        files.append(latest_csv)
+    files.extend(sorted(data_dir.glob("screened_*.csv"), reverse=True))
+
+    cache: dict[str, dict[str, str]] = {}
+    for path in files:
+        try:
+            frame = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
+        except Exception:
+            continue
+        for row in frame.to_dict(orient="records"):
+            ticker = str(row.get("ticker") or "").strip()
+            if ticker and ticker not in cache:
+                cache[ticker] = row
+    return cache
+
+
+def _apply_historical_market_cache(
+    equity: EquitySnapshot,
+    cached: dict[str, str] | None,
+) -> None:
+    if not cached:
+        return
+
+    scalar_fields = {
+        "returns_1m_pct": "returns_1m",
+        "returns_3m_pct": "returns_3m",
+        "returns_6m_pct": "returns_6m",
+        "returns_12m_pct": "returns_12m",
+        "high_52w_ratio_pct": "high_52w_ratio",
+        "ma_20": "ma_20",
+        "ma_60": "ma_60",
+        "ma_120": "ma_120",
+        "avg_trading_value_20d": "avg_trading_value_20d",
+        "avg_trading_value_60d": "avg_trading_value_60d",
+    }
+    for csv_field, attr in scalar_fields.items():
+        if getattr(equity, attr) is None:
+            value = _coerce_float(cached.get(csv_field))
+            if value is not None:
+                setattr(equity, attr, value)
+
+    if equity.returns_1m is not None:
+        equity.clear_missing("returns_1m")
+    if equity.returns_3m is not None:
+        equity.clear_missing("returns_3m")
+    if equity.returns_6m is not None:
+        equity.clear_missing("returns_6m")
+    if equity.returns_12m is not None:
+        equity.clear_missing("returns_12m")
+    if equity.high_52w_ratio is not None:
+        equity.clear_missing("high_52w_ratio")
+    if equity.ma_20 is not None:
+        equity.clear_missing("ma_20")
+    if equity.ma_60 is not None:
+        equity.clear_missing("ma_60")
+    if equity.ma_120 is not None:
+        equity.clear_missing("ma_120")
+    if equity.avg_trading_value_20d is not None:
+        equity.clear_missing("avg_trading_value_20d")
+    if equity.avg_trading_value_60d is not None:
+        equity.clear_missing("avg_trading_value_60d")
+
+
+def _has_minimum_price_bundle(equity: EquitySnapshot) -> bool:
+    return (
+        equity.returns_3m is not None
+        and equity.returns_6m is not None
+        and equity.returns_12m is not None
+        and equity.avg_trading_value_20d is not None
+        and equity.avg_trading_value_60d is not None
+    )
 
 
 def _load_market_listing(

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
+import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE_DIR))
+
+from krx_screening.output_health import assess_output_health
+
 REPORTS_DIR = BASE_DIR / "reports"
 DATA_DIR = BASE_DIR / "data"
 SITE_DIR = BASE_DIR / "site"
@@ -14,6 +20,20 @@ SITE_DATA_DIR = SITE_DIR / "data"
 
 
 def _latest_report_date() -> str:
+    latest_csv = DATA_DIR / "latest.csv"
+    if latest_csv.exists():
+        for dated_csv in sorted(DATA_DIR.glob("screened_*.csv"), reverse=True):
+            if dated_csv.read_bytes() == latest_csv.read_bytes():
+                return dated_csv.stem.replace("screened_", "")
+
+    for dated_csv in sorted(DATA_DIR.glob("screened_*.csv"), reverse=True):
+        try:
+            frame = pd.read_csv(dated_csv, encoding="utf-8-sig")
+        except Exception:
+            continue
+        if assess_output_health(frame).publishable:
+            return dated_csv.stem.replace("screened_", "")
+
     dated_reports = sorted(REPORTS_DIR.glob("daily_*.html"))
     if dated_reports:
         return dated_reports[-1].stem.replace("daily_", "")
