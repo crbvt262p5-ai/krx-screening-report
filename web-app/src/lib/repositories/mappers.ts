@@ -1,4 +1,5 @@
 import { DogProfile, FeedingLog, Product } from "@/lib/types";
+import { PortfolioPosition } from "@/lib/portfolio-dashboard";
 
 export type DogRow = {
   id: string;
@@ -37,6 +38,29 @@ export type FeedingLogRow = {
   total_kcal: number;
   recommended_kcal: number;
   note?: string | null;
+};
+
+export type PortfolioPositionRow = {
+  row_id: string;
+  ticker: string;
+  name: string;
+  market_scope: string;
+  asset_class: string;
+  country: string;
+  theme: string;
+  sub_theme?: string | null;
+  strategy?: string | null;
+  style_bucket?: string | null;
+  trend_view?: string | null;
+  cycle_view?: string | null;
+  conviction?: string | null;
+  fx_exposure?: string | null;
+  timing_view?: string | null;
+  actual_weight_pct: number;
+  target_weight_pct: number;
+  planned_action?: string | null;
+  notes?: string | null;
+  sort_order: number;
 };
 
 export function mapDogRow(row: DogRow): DogProfile {
@@ -127,5 +151,57 @@ export function toFeedingLogRow(log: FeedingLog): FeedingLogRow {
     total_kcal: log.totalKcal,
     recommended_kcal: log.recommendedKcal,
     note: log.note ?? null,
+  };
+}
+
+export function mapPortfolioPositionRow(row: PortfolioPositionRow): PortfolioPosition {
+  return {
+    rowId: row.row_id,
+    ticker: row.ticker,
+    name: row.name,
+    marketScope: row.market_scope,
+    assetClass: row.asset_class,
+    country: row.country,
+    theme: row.theme,
+    subTheme: row.sub_theme ?? "",
+    strategy: row.strategy ?? "",
+    styleBucket: row.style_bucket ?? "",
+    trendView: row.trend_view ?? "",
+    cycleView: row.cycle_view ?? "",
+    conviction: row.conviction ?? "",
+    fxExposure: row.fx_exposure ?? "",
+    timingView: row.timing_view ?? "",
+    actualWeightPct: Number(row.actual_weight_pct),
+    targetWeightPct: Number(row.target_weight_pct),
+    plannedAction: row.planned_action ?? "",
+    notes: row.notes ?? "",
+  };
+}
+
+export function toPortfolioPositionRow(
+  row: PortfolioPosition,
+  sortOrder: number,
+): PortfolioPositionRow {
+  return {
+    row_id: row.rowId,
+    ticker: row.ticker,
+    name: row.name,
+    market_scope: row.marketScope,
+    asset_class: row.assetClass,
+    country: row.country,
+    theme: row.theme,
+    sub_theme: row.subTheme || null,
+    strategy: row.strategy || null,
+    style_bucket: row.styleBucket || null,
+    trend_view: row.trendView || null,
+    cycle_view: row.cycleView || null,
+    conviction: row.conviction || null,
+    fx_exposure: row.fxExposure || null,
+    timing_view: row.timingView || null,
+    actual_weight_pct: row.actualWeightPct,
+    target_weight_pct: row.targetWeightPct,
+    planned_action: row.plannedAction || null,
+    notes: row.notes || null,
+    sort_order: sortOrder,
   };
 }
