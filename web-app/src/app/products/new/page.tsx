@@ -1,5 +1,7 @@
 import { ManualProductForm } from "@/components/manual-product-form";
 
+export const dynamic = "force-dynamic";
+
 type ManualProductPageProps = {
   searchParams?: Promise<{
     dogId?: string;

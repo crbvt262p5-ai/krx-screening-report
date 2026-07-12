@@ -1,5 +1,7 @@
 import { SearchPanel } from "@/components/search-panel";
 
+export const dynamic = "force-dynamic";
+
 type SearchPageProps = {
   searchParams?: Promise<{
     dogId?: string;

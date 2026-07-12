@@ -4,6 +4,8 @@ import { getFeedingLogs } from "@/lib/repositories/feeding-logs";
 import { getFeaturedProducts } from "@/lib/repositories/products";
 import Link from "next/link";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const dogs = await getDogs();
   const featuredProducts = await getFeaturedProducts();

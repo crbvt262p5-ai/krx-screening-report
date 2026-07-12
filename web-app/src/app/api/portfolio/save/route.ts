@@ -2,12 +2,12 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import * as XLSX from "xlsx";
-import { hasSupabaseEnv } from "@/lib/env";
+import { hasSupabaseEnv, isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
 import { upsertPortfolioPositions } from "@/lib/repositories/portfolio";
 
 function resolvePortfolioPath() {
-  return path.resolve(process.cwd(), "..", "data", "portfolio_positions.csv");
+  return path.resolve(process.cwd(), "data", "portfolio_positions.csv");
 }
 
 function toExportRows(rows: PortfolioPosition[]) {
@@ -49,6 +49,15 @@ export async function POST(request: NextRequest) {
         savedCount: rows.length,
         persistence: result.ok ? "supabase" : "csv",
       });
+    }
+
+    if (isVercelRuntime()) {
+      return NextResponse.json(
+        {
+          error: "Vercel 배포에서는 Supabase 연결 없이 CSV 저장을 지원하지 않습니다.",
+        },
+        { status: 501 },
+      );
     }
 
     const worksheet = XLSX.utils.json_to_sheet(toExportRows(rows));

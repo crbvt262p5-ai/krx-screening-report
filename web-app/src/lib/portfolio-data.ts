@@ -1,12 +1,16 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import * as XLSX from "xlsx";
+import { isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
 import { getPortfolioPositions } from "@/lib/repositories/portfolio";
 import { portfolioSeedRecords } from "@/lib/portfolio-seed";
 
-function resolvePortfolioPath() {
-  return path.resolve(process.cwd(), "..", "data", "portfolio_positions.csv");
+function resolvePortfolioPaths() {
+  return [
+    path.resolve(process.cwd(), "data", "portfolio_positions.csv"),
+    path.resolve(process.cwd(), "..", "data", "portfolio_positions.csv"),
+  ];
 }
 
 export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
@@ -15,8 +19,12 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
     return portfolioRows;
   }
 
-  try {
-    const filePath = resolvePortfolioPath();
+  if (isVercelRuntime()) {
+    return normalizePortfolioRecords([...portfolioSeedRecords]);
+  }
+
+  for (const filePath of resolvePortfolioPaths()) {
+    try {
     const buffer = await readFile(filePath);
     const workbook = XLSX.read(buffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
@@ -26,8 +34,11 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
       raw: false,
     });
 
-    return normalizePortfolioRecords(records);
-  } catch {
-    return normalizePortfolioRecords([...portfolioSeedRecords]);
+      return normalizePortfolioRecords(records);
+    } catch {
+      continue;
+    }
   }
+
+  return normalizePortfolioRecords([...portfolioSeedRecords]);
 }
