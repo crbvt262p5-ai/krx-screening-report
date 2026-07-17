@@ -683,6 +683,20 @@ button {
   line-height: 1.55;
 }
 
+.position-opinion,
+.analysis-opinion {
+  border-radius: 0.85rem;
+  background: rgba(244, 248, 255, 0.96);
+  padding: 0.8rem 0.9rem;
+  color: var(--foreground);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.analysis-opinion {
+  margin-top: 0.85rem;
+}
+
 .analysis-chart-grid,
 .analysis-decision-grid {
   display: grid;

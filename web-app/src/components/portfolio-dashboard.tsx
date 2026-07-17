@@ -96,6 +96,36 @@ function buildValuationLens(row: PortfolioPosition) {
   return "절대 밸류보다 포트 역할과 목표 비중 적합성이 더 중요한 종목으로 보입니다.";
 }
 
+function buildDecisionSummary(row: PortfolioPosition) {
+  const gap = row.actualWeightPct - row.targetWeightPct;
+
+  if (row.plannedAction.includes("비중축소") || row.plannedAction.includes("정리")) {
+    if (row.trendView.includes("과열") || row.cycleView.includes("과열")) {
+      return `${row.name}은 과열 신호와 목표 초과 비중이 겹쳐, 수익 보호를 위한 축소 의견입니다.`;
+    }
+    if (gap > 0) {
+      return `${row.name}은 목표보다 ${gap.toFixed(2)}%p 무거워 포트 균형 복귀 목적의 축소 의견입니다.`;
+    }
+    return `${row.name}은 포트 내 역할 대비 비중이 무거워 보여 관리형 축소 의견입니다.`;
+  }
+
+  if (row.plannedAction.includes("추가매수")) {
+    if (gap < 0) {
+      return `${row.name}은 목표보다 ${Math.abs(gap).toFixed(2)}%p 가벼워 비중 복원 목적의 확대 의견입니다.`;
+    }
+    if (row.trendView.includes("진행") || row.cycleView.includes("상승") || row.cycleView.includes("주도")) {
+      return `${row.name}은 추세와 사이클이 살아 있어 눌림 확인 시 확대 가능한 의견입니다.`;
+    }
+    return `${row.name}은 포트 역할 대비 현재 비중이 부족해 보여 추가 검토 의견입니다.`;
+  }
+
+  if (row.plannedAction.includes("관찰")) {
+    return `${row.name}은 지금 비중 조정보다 추세 확인이 먼저인 관찰 의견입니다.`;
+  }
+
+  return `${row.name}은 현재 비중을 급히 움직이기보다 유지 쪽이 더 자연스러운 의견입니다.`;
+}
+
 function buildPortfolioNarrative(rows: PortfolioPosition[], snapshot: ReturnType<typeof buildPortfolioSnapshot>) {
   const topTheme = snapshot.themeMix[0];
   const topTrim = snapshot.trimCandidates[0];
@@ -603,7 +633,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     >
                       <div>
                         <strong>{row.name}</strong>
-                        <p>{row.theme} · {row.marketScope}</p>
+                        <p>{buildDecisionSummary(row)}</p>
                       </div>
                       <span className="gap-pill gap-pill-buy">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
@@ -628,7 +658,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     >
                       <div>
                         <strong>{row.name}</strong>
-                        <p>{row.theme} · {row.marketScope}</p>
+                        <p>{buildDecisionSummary(row)}</p>
                       </div>
                       <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
@@ -750,6 +780,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                         </div>
                         <span className="action-label action-label-trim">비중축소 검토</span>
                       </div>
+                      <p className="analysis-opinion">{buildDecisionSummary(row)}</p>
                       <ul className="analysis-bullet-list">
                         {buildActionReasons(row).map((reason) => (
                           <li key={reason}>{reason}</li>
@@ -789,6 +820,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                         </div>
                         <span className="action-label action-label-buy">추가매수 검토</span>
                       </div>
+                      <p className="analysis-opinion">{buildDecisionSummary(row)}</p>
                       <ul className="analysis-bullet-list">
                         {buildActionReasons(row).map((reason) => (
                           <li key={reason}>{reason}</li>
@@ -890,6 +922,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     {row.plannedAction}
                   </span>
                 </div>
+
+                <p className="position-opinion">{buildDecisionSummary(row)}</p>
 
                 <div className="position-tag-row">
                   <span className="portfolio-mini-tag">{row.theme}</span>
