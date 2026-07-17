@@ -12,6 +12,8 @@ type PortfolioDashboardProps = {
   initialRows: PortfolioPosition[];
 };
 
+type WorkspaceTab = "overview" | "analysis" | "positions" | "editor";
+
 function formatPct(value: number) {
   return `${value.toFixed(2)}%`;
 }
@@ -21,10 +23,124 @@ function formatGap(actualWeightPct: number, targetWeightPct: number) {
   return `${gap > 0 ? "+" : ""}${gap.toFixed(2)}%p`;
 }
 
+function buildActionReasons(row: PortfolioPosition) {
+  const reasons: string[] = [];
+  const gap = row.actualWeightPct - row.targetWeightPct;
+
+  if (gap > 0.75) {
+    reasons.push(`현재 비중이 목표보다 ${gap.toFixed(2)}%p 높습니다.`);
+  } else if (gap < -0.75) {
+    reasons.push(`현재 비중이 목표보다 ${Math.abs(gap).toFixed(2)}%p 낮습니다.`);
+  }
+
+  if (row.trendView.includes("과열")) {
+    reasons.push("추세가 과열 구간으로 표시돼 단기 과열 해소를 점검할 필요가 있습니다.");
+  } else if (row.trendView.includes("눌림")) {
+    reasons.push("추세가 눌림 구간이라면 분할 접근 논리를 붙이기 좋습니다.");
+  } else if (row.trendView.includes("확인 필요")) {
+    reasons.push("추세 확인이 끝나지 않아 비중을 서두르기보다 근거 보강이 먼저입니다.");
+  } else if (row.trendView.includes("진행")) {
+    reasons.push("추세 진행 상태라 방향성은 유지되지만 가격 위치는 따로 점검해야 합니다.");
+  }
+
+  if (row.cycleView.includes("과열")) {
+    reasons.push("사이클도 과열 구간으로 적혀 있어 수익 보호 논리가 생깁니다.");
+  } else if (row.cycleView.includes("주도") || row.cycleView.includes("상승")) {
+    reasons.push("사이클이 아직 상승 흐름이라 너무 빠른 축소는 기회비용이 생길 수 있습니다.");
+  }
+
+  if (row.conviction === "핵심") {
+    reasons.push("핵심 보유군이라 정리보다 목표 비중 복귀 중심으로 보는 편이 자연스럽습니다.");
+  } else if (row.conviction === "위성") {
+    reasons.push("위성 포지션이라면 기준 이탈 시 더 빠른 축소 판단이 가능합니다.");
+  }
+
+  if (row.styleBucket === "인컴") {
+    reasons.push("인컴 자산은 배당/현금흐름 역할을 같이 봐야 해서 비중 조정이 더 보수적이어야 합니다.");
+  } else if (row.styleBucket === "성장") {
+    reasons.push("성장 자산은 추세와 실적 기대를 함께 봐야 하므로 변동성 관리가 중요합니다.");
+  } else if (row.styleBucket === "패시브") {
+    reasons.push("패시브 자산이라 개별 종목보다 테마·지역 익스포저 조절 관점이 더 중요합니다.");
+  }
+
+  if (row.notes) {
+    reasons.push(`메모 반영: ${row.notes}`);
+  }
+
+  return reasons.slice(0, 4);
+}
+
+function buildOutlook(row: PortfolioPosition) {
+  if (row.trendView.includes("과열") && row.plannedAction.includes("비중축소")) {
+    return "상승 추세는 살아 있어도 단기 과열 해소 구간을 염두에 둔 관리형 축소가 어울립니다.";
+  }
+  if (row.trendView.includes("진행") && row.plannedAction.includes("추가매수")) {
+    return "방향성은 우호적이라 눌림 확인 시 비중을 천천히 늘리는 시나리오가 자연스럽습니다.";
+  }
+  if (row.trendView.includes("확인 필요")) {
+    return "지금은 전망 확신보다 체크리스트 보강이 우선이라 관찰 강도가 더 중요합니다.";
+  }
+  return "현재 분류상으로는 추세와 목표 비중의 균형을 맞추는 운영이 우선입니다.";
+}
+
+function buildValuationLens(row: PortfolioPosition) {
+  if (row.strategy.includes("Value") || row.theme.includes("금융") || row.theme.includes("지주사")) {
+    return "밸류 관점에서는 할인 해소 여지와 자산가치 재평가가 핵심 근거입니다.";
+  }
+  if (row.styleBucket === "성장" || row.theme.includes("AI") || row.theme.includes("반도체")) {
+    return "밸류보다 성장 지속성, 실적 모멘텀, 주도주 프리미엄이 더 중요한 구간입니다.";
+  }
+  if (row.styleBucket === "인컴") {
+    return "밸류는 배당 지속성과 현금흐름 방어력으로 해석하는 편이 더 맞습니다.";
+  }
+  return "절대 밸류보다 포트 역할과 목표 비중 적합성이 더 중요한 종목으로 보입니다.";
+}
+
+function buildPortfolioNarrative(rows: PortfolioPosition[], snapshot: ReturnType<typeof buildPortfolioSnapshot>) {
+  const topTheme = snapshot.themeMix[0];
+  const topTrim = snapshot.trimCandidates[0];
+  const topBuy = snapshot.buyCandidates[0];
+  const narratives: string[] = [];
+
+  if (topTheme) {
+    narratives.push(`현재 최대 테마는 ${topTheme.label}로 실제 비중 ${formatPct(topTheme.actualWeightPct)}입니다.`);
+  }
+  if (snapshot.topFiveWeight > 35) {
+    narratives.push(`상위 5종목 비중이 ${formatPct(snapshot.topFiveWeight)}로 높아 종목 집중 관리가 필요합니다.`);
+  } else {
+    narratives.push(`상위 5종목 비중이 ${formatPct(snapshot.topFiveWeight)}라 집중도는 관리 가능한 범위입니다.`);
+  }
+  narratives.push(`국내/해외 비중은 ${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}입니다.`);
+  if (topTrim) {
+    narratives.push(`${topTrim.name}은 목표 초과폭이 커서 우선 축소 후보로 보입니다.`);
+  }
+  if (topBuy) {
+    narratives.push(`${topBuy.name}은 목표 미달폭이 커서 추가 검토 1순위 후보입니다.`);
+  }
+  return narratives;
+}
+
+function buildDonutStyle(items: Array<{ actualWeightPct: number }>, colors: string[]) {
+  const total = items.reduce((sum, item) => sum + item.actualWeightPct, 0);
+  if (!total) {
+    return { background: "conic-gradient(#dbe6f6 0deg 360deg)" };
+  }
+
+  let current = 0;
+  const stops = items.map((item, index) => {
+    const start = current;
+    const sweep = (item.actualWeightPct / total) * 360;
+    current += sweep;
+    return `${colors[index % colors.length]} ${start}deg ${current}deg`;
+  });
+
+  return { background: `conic-gradient(${stops.join(", ")})` };
+}
+
 export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
   const usesCloudStorage = hasSupabaseEnv();
   const [rows, setRows] = useState(initialRows);
-  const [workspaceTab, setWorkspaceTab] = useState<"overview" | "positions" | "editor">("overview");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("overview");
   const [query, setQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState("전체");
   const [actionFilter, setActionFilter] = useState("전체");
@@ -86,6 +202,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
   const quickTabs = ["전체", "핵심 보유", "추가매수", "비중축소", "관찰"];
   const workspaceTabs = [
     { key: "overview", label: "개요", description: "요약과 리밸런싱 우선순위" },
+    { key: "analysis", label: "분석", description: "비중 사유와 인사이트" },
     { key: "positions", label: "종목", description: "검색, 필터, 종목 비교" },
     { key: "editor", label: "편집", description: "선택 종목 상세 수정" },
   ] as const;
@@ -261,6 +378,11 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     .map((item) => `${item.label} ${formatPct(item.actualWeightPct)}`)
     .join(" · ");
   const domesticVsOverseas = `${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}`;
+  const analysisThemeMix = snapshot.themeMix.slice(0, 5);
+  const analysisRegionMix = snapshot.regionMix.slice(0, 3);
+  const themeChartStyle = buildDonutStyle(analysisThemeMix, ["#1f6feb", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444"]);
+  const regionChartStyle = buildDonutStyle(analysisRegionMix, ["#174ea6", "#06b6d4", "#94a3b8"]);
+  const portfolioNarrative = buildPortfolioNarrative(rows, snapshot);
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -510,6 +632,179 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                       </div>
                       <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {workspaceTab === "analysis" ? (
+        <>
+          <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+            <section className="panel">
+              <div className="section-head">
+                <div>
+                  <p className="section-kicker">포트 구조</p>
+                  <h2>비중 시각화</h2>
+                </div>
+              </div>
+
+              <div className="analysis-chart-grid mt-5">
+                <article className="analysis-chart-card">
+                  <div>
+                    <p className="section-kicker">테마 비중</p>
+                    <h3>상위 테마 원형 비중</h3>
+                  </div>
+                  <div className="analysis-donut" style={themeChartStyle}>
+                    <div className="analysis-donut-center">
+                      <strong>{analysisThemeMix.length}</strong>
+                      <span>상위 테마</span>
+                    </div>
+                  </div>
+                  <div className="analysis-legend">
+                    {analysisThemeMix.map((item, index) => (
+                      <div className="analysis-legend-row" key={item.label}>
+                        <span
+                          className="analysis-dot"
+                          style={{ backgroundColor: ["#1f6feb", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444"][index] }}
+                        />
+                        <strong>{item.label}</strong>
+                        <span>{formatPct(item.actualWeightPct)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="analysis-chart-card">
+                  <div>
+                    <p className="section-kicker">지역 비중</p>
+                    <h3>국내 / 해외 구성</h3>
+                  </div>
+                  <div className="analysis-donut analysis-donut-small" style={regionChartStyle}>
+                    <div className="analysis-donut-center">
+                      <strong>{formatPct(snapshot.domesticWeight + snapshot.overseasWeight)}</strong>
+                      <span>투자 비중</span>
+                    </div>
+                  </div>
+                  <div className="analysis-legend">
+                    {analysisRegionMix.map((item, index) => (
+                      <div className="analysis-legend-row" key={item.label}>
+                        <span
+                          className="analysis-dot"
+                          style={{ backgroundColor: ["#174ea6", "#06b6d4", "#94a3b8"][index] }}
+                        />
+                        <strong>{item.label}</strong>
+                        <span>{formatPct(item.actualWeightPct)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="section-head">
+                <div>
+                  <p className="section-kicker">포트 코멘트</p>
+                  <h2>현재 포트 인사이트</h2>
+                </div>
+              </div>
+
+              <div className="analysis-note-stack mt-5">
+                {portfolioNarrative.map((line) => (
+                  <article className="analysis-note-card" key={line}>
+                    <p>{line}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </section>
+
+          <section className="panel">
+            <div className="section-head">
+              <div>
+                <p className="section-kicker">액션 근거</p>
+                <h2>비중 조정 사유</h2>
+              </div>
+            </div>
+
+            <div className="analysis-decision-grid mt-5">
+              <section className="analysis-decision-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">축소 후보</p>
+                    <h3>왜 비중을 줄이나</h3>
+                  </div>
+                </div>
+                <div className="stack gap-4">
+                  {snapshot.trimCandidates.map((row) => (
+                    <article className="analysis-security-card" key={row.rowId}>
+                      <div className="position-card-top">
+                        <div>
+                          <p className="dog-name">{row.name}</p>
+                          <p className="muted-copy">
+                            {row.theme} · {row.marketScope} · {formatGap(row.actualWeightPct, row.targetWeightPct)}
+                          </p>
+                        </div>
+                        <span className="action-label action-label-trim">비중축소 검토</span>
+                      </div>
+                      <ul className="analysis-bullet-list">
+                        {buildActionReasons(row).map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                      <div className="analysis-meta-grid">
+                        <div>
+                          <span>전망</span>
+                          <strong>{buildOutlook(row)}</strong>
+                        </div>
+                        <div>
+                          <span>밸류 / 해석</span>
+                          <strong>{buildValuationLens(row)}</strong>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="analysis-decision-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">매수 후보</p>
+                    <h3>왜 더 볼 만한가</h3>
+                  </div>
+                </div>
+                <div className="stack gap-4">
+                  {snapshot.buyCandidates.map((row) => (
+                    <article className="analysis-security-card" key={row.rowId}>
+                      <div className="position-card-top">
+                        <div>
+                          <p className="dog-name">{row.name}</p>
+                          <p className="muted-copy">
+                            {row.theme} · {row.marketScope} · {formatGap(row.actualWeightPct, row.targetWeightPct)}
+                          </p>
+                        </div>
+                        <span className="action-label action-label-buy">추가매수 검토</span>
+                      </div>
+                      <ul className="analysis-bullet-list">
+                        {buildActionReasons(row).map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                      <div className="analysis-meta-grid">
+                        <div>
+                          <span>전망</span>
+                          <strong>{buildOutlook(row)}</strong>
+                        </div>
+                        <div>
+                          <span>밸류 / 해석</span>
+                          <strong>{buildValuationLens(row)}</strong>
+                        </div>
+                      </div>
+                    </article>
                   ))}
                 </div>
               </section>
