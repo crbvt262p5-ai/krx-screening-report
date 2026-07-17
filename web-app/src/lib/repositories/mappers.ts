@@ -48,6 +48,7 @@ export type PortfolioPositionRow = {
   asset_class: string;
   country: string;
   theme: string;
+  theme_category?: string | null;
   sub_theme?: string | null;
   strategy?: string | null;
   style_bucket?: string | null;
@@ -58,6 +59,10 @@ export type PortfolioPositionRow = {
   timing_view?: string | null;
   actual_weight_pct: number;
   target_weight_pct: number;
+  per?: number | null;
+  pbr?: number | null;
+  eps?: number | null;
+  forward_per?: number | null;
   planned_action?: string | null;
   notes?: string | null;
   sort_order: number;
@@ -163,6 +168,7 @@ export function mapPortfolioPositionRow(row: PortfolioPositionRow): PortfolioPos
     assetClass: row.asset_class,
     country: row.country,
     theme: row.theme,
+    themeCategory: row.theme_category ?? "",
     subTheme: row.sub_theme ?? "",
     strategy: row.strategy ?? "",
     styleBucket: row.style_bucket ?? "",
@@ -173,6 +179,10 @@ export function mapPortfolioPositionRow(row: PortfolioPositionRow): PortfolioPos
     timingView: row.timing_view ?? "",
     actualWeightPct: Number(row.actual_weight_pct),
     targetWeightPct: Number(row.target_weight_pct),
+    per: row.per ?? null,
+    pbr: row.pbr ?? null,
+    eps: row.eps ?? null,
+    forwardPer: row.forward_per ?? null,
     plannedAction: row.planned_action ?? "",
     notes: row.notes ?? "",
   };
@@ -190,6 +200,7 @@ export function toPortfolioPositionRow(
     asset_class: row.assetClass,
     country: row.country,
     theme: row.theme,
+    theme_category: row.themeCategory || null,
     sub_theme: row.subTheme || null,
     strategy: row.strategy || null,
     style_bucket: row.styleBucket || null,
@@ -200,6 +211,10 @@ export function toPortfolioPositionRow(
     timing_view: row.timingView || null,
     actual_weight_pct: row.actualWeightPct,
     target_weight_pct: row.targetWeightPct,
+    per: row.per,
+    pbr: row.pbr,
+    eps: row.eps,
+    forward_per: row.forwardPer,
     planned_action: row.plannedAction || null,
     notes: row.notes || null,
     sort_order: sortOrder,

@@ -6,6 +6,7 @@ export type PortfolioPosition = {
   assetClass: string;
   country: string;
   theme: string;
+  themeCategory: string;
   subTheme: string;
   strategy: string;
   styleBucket: string;
@@ -16,6 +17,10 @@ export type PortfolioPosition = {
   timingView: string;
   actualWeightPct: number;
   targetWeightPct: number;
+  per: number | null;
+  pbr: number | null;
+  eps: number | null;
+  forwardPer: number | null;
   plannedAction: string;
   notes: string;
 };
@@ -46,6 +51,7 @@ const FIELD_ALIASES: Record<Exclude<keyof PortfolioPosition, "rowId">, string[]>
   assetClass: ["asset_class", "assetClass", "자산구분", "자산"],
   country: ["country", "국가"],
   theme: ["theme", "테마"],
+  themeCategory: ["theme_category", "themeCategory", "테마종류", "테마분류"],
   subTheme: ["sub_theme", "subTheme", "세부테마", "서브테마"],
   strategy: ["strategy", "전략"],
   styleBucket: ["style_bucket", "styleBucket", "스타일"],
@@ -56,6 +62,10 @@ const FIELD_ALIASES: Record<Exclude<keyof PortfolioPosition, "rowId">, string[]>
   timingView: ["timing_view", "timingView", "매수타이밍", "타이밍"],
   actualWeightPct: ["actual_weight_pct", "actualWeightPct", "actual_weight", "실제비중", "비중"],
   targetWeightPct: ["target_weight_pct", "targetWeightPct", "target_weight", "목표비중"],
+  per: ["per", "PER"],
+  pbr: ["pbr", "PBR"],
+  eps: ["eps", "EPS"],
+  forwardPer: ["forward_per", "forwardPer", "forwardPER", "포워드PER", "선행PER"],
   plannedAction: ["planned_action", "plannedAction", "액션", "운영액션"],
   notes: ["notes", "메모", "노트"],
 };
@@ -72,6 +82,15 @@ function parseNumber(value: unknown): number {
   const normalized = toCellString(value).replaceAll(",", "").replaceAll("%", "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseNullableNumber(value: unknown): number | null {
+  const normalized = toCellString(value).replaceAll(",", "").replaceAll("%", "");
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readField(record: RawRecord, aliases: string[]): unknown {
@@ -119,6 +138,31 @@ function inferCountry(marketScope: string, ticker: string, country: string): str
   return "기타해외";
 }
 
+function inferThemeCategory(theme: string, assetClass: string, themeCategory: string): string {
+  if (themeCategory) {
+    return themeCategory;
+  }
+  if (assetClass === "ETF") {
+    return "ETF / 패시브";
+  }
+  if (["AI", "반도체", "빅테크", "미국 빅테크"].includes(theme)) {
+    return "성장 기술";
+  }
+  if (["금융", "배당", "통신", "유틸리티"].includes(theme)) {
+    return "인컴 / 방어";
+  }
+  if (["지주사", "자산주", "건자재", "상사"].includes(theme)) {
+    return "자산 가치";
+  }
+  if (["자동차", "산업재", "방산", "수출주"].includes(theme)) {
+    return "경기 민감";
+  }
+  if (["소비재", "미디어", "바이오"].includes(theme)) {
+    return "개별 성장";
+  }
+  return "기타";
+}
+
 export function normalizePortfolioRecords(records: RawRecord[]): PortfolioPosition[] {
   return records
     .map((record, index) => {
@@ -127,6 +171,7 @@ export function normalizePortfolioRecords(records: RawRecord[]): PortfolioPositi
       const assetClass = inferAssetClass(name, toCellString(readField(record, FIELD_ALIASES.assetClass)));
       const marketScope = inferMarketScope(ticker, assetClass, toCellString(readField(record, FIELD_ALIASES.marketScope)));
       const country = inferCountry(marketScope, ticker, toCellString(readField(record, FIELD_ALIASES.country)));
+      const theme = toCellString(readField(record, FIELD_ALIASES.theme)) || "미분류";
 
       return {
         rowId: `${ticker || "row"}-${name || "position"}-${index + 1}`,
@@ -135,7 +180,12 @@ export function normalizePortfolioRecords(records: RawRecord[]): PortfolioPositi
         marketScope,
         assetClass,
         country,
-        theme: toCellString(readField(record, FIELD_ALIASES.theme)) || "미분류",
+        theme,
+        themeCategory: inferThemeCategory(
+          theme,
+          assetClass,
+          toCellString(readField(record, FIELD_ALIASES.themeCategory)),
+        ),
         subTheme: toCellString(readField(record, FIELD_ALIASES.subTheme)),
         strategy: toCellString(readField(record, FIELD_ALIASES.strategy)),
         styleBucket: toCellString(readField(record, FIELD_ALIASES.styleBucket)),
@@ -146,6 +196,10 @@ export function normalizePortfolioRecords(records: RawRecord[]): PortfolioPositi
         timingView: toCellString(readField(record, FIELD_ALIASES.timingView)),
         actualWeightPct: parseNumber(readField(record, FIELD_ALIASES.actualWeightPct)),
         targetWeightPct: parseNumber(readField(record, FIELD_ALIASES.targetWeightPct)),
+        per: parseNullableNumber(readField(record, FIELD_ALIASES.per)),
+        pbr: parseNullableNumber(readField(record, FIELD_ALIASES.pbr)),
+        eps: parseNullableNumber(readField(record, FIELD_ALIASES.eps)),
+        forwardPer: parseNullableNumber(readField(record, FIELD_ALIASES.forwardPer)),
         plannedAction: toCellString(readField(record, FIELD_ALIASES.plannedAction)) || "미분류",
         notes: toCellString(readField(record, FIELD_ALIASES.notes)),
       };
@@ -176,6 +230,7 @@ export function buildPortfolioSnapshot(rows: PortfolioPosition[]) {
   const assetMix = buildMix(rows, "assetClass");
   const trendMix = buildMix(rows, "trendView");
   const actionMix = buildMix(rows, "plannedAction");
+  const themeCategoryMix = buildMix(rows, "themeCategory");
   const sortedByActual = [...rows].sort((left, right) => right.actualWeightPct - left.actualWeightPct);
   const sortedByGap = [...rows].sort(
     (left, right) =>
@@ -207,6 +262,7 @@ export function buildPortfolioSnapshot(rows: PortfolioPosition[]) {
     targetWeightSum,
     cashDrag,
     themeMix,
+    themeCategoryMix,
     regionMix,
     assetMix,
     trendMix,

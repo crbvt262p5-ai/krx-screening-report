@@ -23,6 +23,39 @@ function formatGap(actualWeightPct: number, targetWeightPct: number) {
   return `${gap > 0 ? "+" : ""}${gap.toFixed(2)}%p`;
 }
 
+function formatMultiple(value: number | null, suffix = "배") {
+  if (value === null) {
+    return "미입력";
+  }
+  return `${value.toFixed(1)}${suffix}`;
+}
+
+function formatNumberValue(value: number | null) {
+  if (value === null) {
+    return "미입력";
+  }
+  return value.toLocaleString("ko-KR");
+}
+
+function buildValuationSignal(row: PortfolioPosition) {
+  if (row.per !== null && row.per <= 10) {
+    return `PER ${formatMultiple(row.per)}로 저평가 점검 구간에 가깝습니다.`;
+  }
+  if (row.per !== null && row.per >= 25) {
+    return `PER ${formatMultiple(row.per)}로 밸류 부담이 커져 성장 지속 확인이 필요합니다.`;
+  }
+  if (row.forwardPer !== null && row.per !== null && row.forwardPer < row.per) {
+    return `Forward PER ${formatMultiple(row.forwardPer)}가 현재 PER보다 낮아 이익 개선 기대가 반영됩니다.`;
+  }
+  if (row.pbr !== null && row.pbr <= 1) {
+    return `PBR ${formatMultiple(row.pbr)}로 자산가치 대비 할인 여부를 같이 볼 수 있습니다.`;
+  }
+  if (row.per === null && row.pbr === null && row.forwardPer === null) {
+    return "밸류 지표가 아직 비어 있어 확대/축소 판단 근거가 약합니다.";
+  }
+  return "밸류 지표는 중립권으로 보여 추세와 포트 역할을 함께 봐야 합니다.";
+}
+
 function buildActionReasons(row: PortfolioPosition) {
   const reasons: string[] = [];
   const gap = row.actualWeightPct - row.targetWeightPct;
@@ -63,6 +96,8 @@ function buildActionReasons(row: PortfolioPosition) {
     reasons.push("패시브 자산이라 개별 종목보다 테마·지역 익스포저 조절 관점이 더 중요합니다.");
   }
 
+  reasons.push(buildValuationSignal(row));
+
   if (row.notes) {
     reasons.push(`메모 반영: ${row.notes}`);
   }
@@ -84,6 +119,13 @@ function buildOutlook(row: PortfolioPosition) {
 }
 
 function buildValuationLens(row: PortfolioPosition) {
+  if (row.per !== null || row.pbr !== null || row.forwardPer !== null) {
+    const perText = row.per !== null ? `PER ${formatMultiple(row.per)}` : "PER 미입력";
+    const pbrText = row.pbr !== null ? `PBR ${formatMultiple(row.pbr)}` : "PBR 미입력";
+    const forwardText =
+      row.forwardPer !== null ? `Forward PER ${formatMultiple(row.forwardPer)}` : "Forward PER 미입력";
+    return `${perText} · ${pbrText} · ${forwardText}`;
+  }
   if (row.strategy.includes("Value") || row.theme.includes("금융") || row.theme.includes("지주사")) {
     return "밸류 관점에서는 할인 해소 여지와 자산가치 재평가가 핵심 근거입니다.";
   }
@@ -100,6 +142,9 @@ function buildDecisionSummary(row: PortfolioPosition) {
   const gap = row.actualWeightPct - row.targetWeightPct;
 
   if (row.plannedAction.includes("비중축소") || row.plannedAction.includes("정리")) {
+    if (row.per !== null && row.per >= 25) {
+      return `${row.name}은 밸류 부담과 초과 비중이 겹쳐, 비중 축소 의견이 더 설득력 있습니다.`;
+    }
     if (row.trendView.includes("과열") || row.cycleView.includes("과열")) {
       return `${row.name}은 과열 신호와 목표 초과 비중이 겹쳐, 수익 보호를 위한 축소 의견입니다.`;
     }
@@ -110,6 +155,9 @@ function buildDecisionSummary(row: PortfolioPosition) {
   }
 
   if (row.plannedAction.includes("추가매수")) {
+    if (row.per !== null && row.forwardPer !== null && row.forwardPer < row.per) {
+      return `${row.name}은 목표 비중보다 가볍고 선행 밸류가 개선돼 확대 검토 의견입니다.`;
+    }
     if (gap < 0) {
       return `${row.name}은 목표보다 ${Math.abs(gap).toFixed(2)}%p 가벼워 비중 복원 목적의 확대 의견입니다.`;
     }
@@ -147,6 +195,10 @@ function buildPortfolioNarrative(rows: PortfolioPosition[], snapshot: ReturnType
   if (topBuy) {
     narratives.push(`${topBuy.name}은 목표 미달폭이 커서 추가 검토 1순위 후보입니다.`);
   }
+  const valuationCoverage = rows.filter(
+    (row) => row.per !== null || row.pbr !== null || row.forwardPer !== null || row.eps !== null,
+  ).length;
+  narratives.push(`밸류 지표가 입력된 종목은 ${valuationCoverage}개로, 이 숫자가 많을수록 의견 설명의 설득력이 올라갑니다.`);
   return narratives;
 }
 
@@ -303,6 +355,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
       asset_class: row.assetClass,
       country: row.country,
       theme: row.theme,
+      theme_category: row.themeCategory,
       sub_theme: row.subTheme,
       strategy: row.strategy,
       style_bucket: row.styleBucket,
@@ -313,6 +366,10 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
       timing_view: row.timingView,
       actual_weight_pct: row.actualWeightPct,
       target_weight_pct: row.targetWeightPct,
+      per: row.per,
+      pbr: row.pbr,
+      eps: row.eps,
+      forward_per: row.forwardPer,
       planned_action: row.plannedAction,
       notes: row.notes,
     }));
@@ -407,6 +464,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
   const topThemeSummary = topThemes
     .map((item) => `${item.label} ${formatPct(item.actualWeightPct)}`)
     .join(" · ");
+  const topThemeCategories = snapshot.themeCategoryMix.slice(0, 3);
   const domesticVsOverseas = `${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}`;
   const analysisThemeMix = snapshot.themeMix.slice(0, 5);
   const analysisRegionMix = snapshot.regionMix.slice(0, 3);
@@ -422,8 +480,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
           <div className="space-y-2">
             <h1 className="hero-title">포트 조정용 운영 화면</h1>
             <p className="hero-copy">
-              화면을 세 구역으로 나눠서 보이게 정리했습니다. 개요에서 흐름을 보고, 종목에서 후보를
-              고르고, 편집에서 바로 수정하는 구조입니다.
+              장식은 줄이고 정보 밀도는 높였습니다. 기술적 흐름만이 아니라 테마군과 밸류 지표까지
+              함께 보면서 확대·축소 의견을 판단하는 구조입니다.
             </p>
           </div>
           <p className="hero-inline-note">상위 테마: {topThemeSummary}</p>
@@ -494,6 +552,10 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 <article className="portfolio-stat-card">
                   <span>테마 수</span>
                   <strong>{snapshot.themeCount}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>상위 테마군</span>
+                  <strong>{topThemeCategories.map((item) => item.label).join(" · ") || "미분류"}</strong>
                 </article>
                 <article className="portfolio-stat-card">
                   <span>국가 수</span>
@@ -926,6 +988,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 <p className="position-opinion">{buildDecisionSummary(row)}</p>
 
                 <div className="position-tag-row">
+                  <span className="portfolio-mini-tag">{row.themeCategory || "테마군 미입력"}</span>
                   <span className="portfolio-mini-tag">{row.theme}</span>
                   <span className="portfolio-mini-tag">{row.subTheme || "세부테마 미입력"}</span>
                   <span className="portfolio-mini-tag">{row.trendView || "추세 미입력"}</span>
@@ -943,6 +1006,25 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   <div>
                     <span>갭</span>
                     <strong>{formatGap(row.actualWeightPct, row.targetWeightPct)}</strong>
+                  </div>
+                </div>
+
+                <div className="valuation-grid">
+                  <div>
+                    <span>PER</span>
+                    <strong>{formatMultiple(row.per)}</strong>
+                  </div>
+                  <div>
+                    <span>PBR</span>
+                    <strong>{formatMultiple(row.pbr)}</strong>
+                  </div>
+                  <div>
+                    <span>EPS</span>
+                    <strong>{formatNumberValue(row.eps)}</strong>
+                  </div>
+                  <div>
+                    <span>Fwd PER</span>
+                    <strong>{formatMultiple(row.forwardPer)}</strong>
                   </div>
                 </div>
 
@@ -999,6 +1081,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   <span className="badge">{selectedRow.conviction || "미분류"}</span>
                 </div>
                 <div className="portfolio-tag-strip">
+                  <span className="portfolio-mini-tag">{selectedRow.themeCategory || "테마군 미입력"}</span>
                   <span className="portfolio-mini-tag">{selectedRow.theme}</span>
                   <span className="portfolio-mini-tag">{selectedRow.subTheme || "세부 테마 미입력"}</span>
                   <span className="portfolio-mini-tag">{selectedRow.strategy || "전략 미입력"}</span>
@@ -1022,10 +1105,32 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     <strong>{selectedRow.fxExposure || "-"}</strong>
                   </article>
                 </div>
+                <div className="valuation-grid valuation-grid-wide">
+                  <div>
+                    <span>PER</span>
+                    <strong>{formatMultiple(selectedRow.per)}</strong>
+                  </div>
+                  <div>
+                    <span>PBR</span>
+                    <strong>{formatMultiple(selectedRow.pbr)}</strong>
+                  </div>
+                  <div>
+                    <span>EPS</span>
+                    <strong>{formatNumberValue(selectedRow.eps)}</strong>
+                  </div>
+                  <div>
+                    <span>Fwd PER</span>
+                    <strong>{formatMultiple(selectedRow.forwardPer)}</strong>
+                  </div>
+                </div>
                 <div className="portfolio-classification-grid">
                   <div>
                     <span>국가</span>
                     <strong>{selectedRow.country || "-"}</strong>
+                  </div>
+                  <div>
+                    <span>테마군</span>
+                    <strong>{selectedRow.themeCategory || "-"}</strong>
                   </div>
                   <div>
                     <span>스타일</span>
@@ -1047,6 +1152,10 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 {draft ? (
                   <div className="portfolio-edit-grid">
                     <label className="portfolio-field">
+                      <span>테마군</span>
+                      <input className="portfolio-input" value={draft.themeCategory} onChange={(event) => handleDraftChange("themeCategory", event.target.value)} />
+                    </label>
+                    <label className="portfolio-field">
                       <span>테마</span>
                       <input className="portfolio-input" value={draft.theme} onChange={(event) => handleDraftChange("theme", event.target.value)} />
                     </label>
@@ -1057,6 +1166,22 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     <label className="portfolio-field">
                       <span>전략</span>
                       <input className="portfolio-input" value={draft.strategy} onChange={(event) => handleDraftChange("strategy", event.target.value)} />
+                    </label>
+                    <label className="portfolio-field">
+                      <span>PER</span>
+                      <input className="portfolio-input" type="number" step="0.1" value={draft.per ?? ""} onChange={(event) => handleDraftChange("per", event.target.value === "" ? null : Number(event.target.value))} />
+                    </label>
+                    <label className="portfolio-field">
+                      <span>PBR</span>
+                      <input className="portfolio-input" type="number" step="0.1" value={draft.pbr ?? ""} onChange={(event) => handleDraftChange("pbr", event.target.value === "" ? null : Number(event.target.value))} />
+                    </label>
+                    <label className="portfolio-field">
+                      <span>EPS</span>
+                      <input className="portfolio-input" type="number" step="1" value={draft.eps ?? ""} onChange={(event) => handleDraftChange("eps", event.target.value === "" ? null : Number(event.target.value))} />
+                    </label>
+                    <label className="portfolio-field">
+                      <span>Fwd PER</span>
+                      <input className="portfolio-input" type="number" step="0.1" value={draft.forwardPer ?? ""} onChange={(event) => handleDraftChange("forwardPer", event.target.value === "" ? null : Number(event.target.value))} />
                     </label>
                     <label className="portfolio-field">
                       <span>추세</span>

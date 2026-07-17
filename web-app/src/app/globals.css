@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f3f6fb;
-  --foreground: #162033;
-  --panel: rgba(255, 255, 255, 0.96);
-  --line: rgba(70, 92, 124, 0.14);
-  --muted: #63708a;
-  --accent: #1f6feb;
-  --accent-strong: #174ea6;
-  --accent-soft: #e8f0ff;
-  --shadow: 0 12px 30px rgba(26, 41, 67, 0.08);
+  --background: #f5f7fb;
+  --foreground: #191f28;
+  --panel: rgba(255, 255, 255, 0.98);
+  --line: rgba(137, 145, 160, 0.18);
+  --muted: #6b7684;
+  --accent: #3182f6;
+  --accent-strong: #1b64da;
+  --accent-soft: #eef5ff;
+  --shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
 
 @theme inline {
@@ -31,7 +31,7 @@ html {
 
 body {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f7f9fc 0%, #eff4fb 100%);
+  background: #f5f7fb;
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR",
     "Malgun Gothic", "Segoe UI", sans-serif;
@@ -54,7 +54,7 @@ button {
   gap: 1rem;
   border-radius: 1.25rem;
   padding: 1.25rem 1.35rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 255, 0.96));
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .panel {
@@ -80,8 +80,8 @@ button {
 
 .hero-title {
   max-width: 18ch;
-  font-size: clamp(1.8rem, 3vw, 2.4rem);
-  line-height: 1.12;
+  font-size: clamp(1.7rem, 2.7vw, 2.2rem);
+  line-height: 1.18;
 }
 
 .hero-copy,
@@ -92,8 +92,8 @@ button {
 
 .hero-copy {
   max-width: 70ch;
-  font-size: 0.95rem;
-  line-height: 1.55;
+  font-size: 0.93rem;
+  line-height: 1.62;
 }
 
 .hero-inline-note {
@@ -147,7 +147,7 @@ button {
 
 .workspace-tab-active {
   border-color: rgba(31, 111, 235, 0.22);
-  background: linear-gradient(180deg, rgba(232, 240, 255, 0.92), rgba(255, 255, 255, 0.96));
+  background: rgba(238, 245, 255, 0.98);
   box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.16);
 }
 
@@ -164,7 +164,7 @@ button {
 .primary-cta,
 .primary-small {
   color: #f8fbff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  background: var(--accent);
 }
 
 .primary-cta {
@@ -343,7 +343,8 @@ button {
 .portfolio-stat-card strong {
   display: block;
   margin-top: 0.45rem;
-  font-size: 1.2rem;
+  font-size: 1.08rem;
+  line-height: 1.35;
 }
 
 .portfolio-mix-grid {
@@ -683,6 +684,33 @@ button {
   line-height: 1.55;
 }
 
+.valuation-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(70, 92, 124, 0.1);
+  border-radius: 0.95rem;
+  background: rgba(250, 252, 255, 0.98);
+  padding: 0.85rem 0.9rem;
+}
+
+.valuation-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.valuation-grid strong {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.valuation-grid-wide {
+  margin-top: 0.95rem;
+}
+
 .position-opinion,
 .analysis-opinion {
   border-radius: 0.85rem;
@@ -878,7 +906,8 @@ button {
   }
 
   .position-metrics,
-  .position-detail-grid {
+  .position-detail-grid,
+  .valuation-grid {
     grid-template-columns: 1fr;
   }
 }

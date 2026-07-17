@@ -17,6 +17,7 @@ function toExportRows(rows: PortfolioPosition[]) {
     asset_class: row.assetClass,
     country: row.country,
     theme: row.theme,
+    theme_category: row.themeCategory,
     sub_theme: row.subTheme,
     strategy: row.strategy,
     style_bucket: row.styleBucket,
@@ -27,6 +28,10 @@ function toExportRows(rows: PortfolioPosition[]) {
     timing_view: row.timingView,
     actual_weight_pct: row.actualWeightPct,
     target_weight_pct: row.targetWeightPct,
+    per: row.per,
+    pbr: row.pbr,
+    eps: row.eps,
+    forward_per: row.forwardPer,
     planned_action: row.plannedAction,
     notes: row.notes,
   }));
