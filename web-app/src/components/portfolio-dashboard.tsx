@@ -24,6 +24,7 @@ function formatGap(actualWeightPct: number, targetWeightPct: number) {
 export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
   const usesCloudStorage = hasSupabaseEnv();
   const [rows, setRows] = useState(initialRows);
+  const [workspaceTab, setWorkspaceTab] = useState<"overview" | "positions" | "editor">("overview");
   const [query, setQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState("전체");
   const [actionFilter, setActionFilter] = useState("전체");
@@ -83,6 +84,11 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
 
   const snapshot = useMemo(() => buildPortfolioSnapshot(rows), [rows]);
   const quickTabs = ["전체", "핵심 보유", "추가매수", "비중축소", "관찰"];
+  const workspaceTabs = [
+    { key: "overview", label: "개요", description: "요약과 리밸런싱 우선순위" },
+    { key: "positions", label: "종목", description: "검색, 필터, 종목 비교" },
+    { key: "editor", label: "편집", description: "선택 종목 상세 수정" },
+  ] as const;
   const selectedRow =
     rows.find((row) => row.rowId === selectedRowId) ??
     rows[0] ??
@@ -99,6 +105,12 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
       return "watch";
     }
     return "hold";
+  }
+
+  function selectRow(row: PortfolioPosition, nextTab: "positions" | "editor" = "editor") {
+    setSelectedRowId(row.rowId);
+    setDraft({ ...row });
+    setWorkspaceTab(nextTab);
   }
 
   async function handleUploadFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -157,6 +169,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
       planned_action: row.plannedAction,
       notes: row.notes,
     }));
+
     void (async () => {
       const { utils, writeFile } = await import("xlsx");
       const worksheet = utils.json_to_sheet(exportRows);
@@ -257,8 +270,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
           <div className="space-y-2">
             <h1 className="hero-title">포트 조정용 운영 화면</h1>
             <p className="hero-copy">
-              국내/해외, 테마, 전략, 추세, 실제 비중, 목표 비중, 액션을 한 번에 보고 바로 수정하는
-              용도입니다.
+              화면을 세 구역으로 나눠서 보이게 정리했습니다. 개요에서 흐름을 보고, 종목에서 후보를
+              고르고, 편집에서 바로 수정하는 구조입니다.
             </p>
           </div>
           <p className="hero-inline-note">상위 테마: {topThemeSummary}</p>
@@ -267,12 +280,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
         <div className="hero-actions">
           <label className="primary-cta portfolio-upload">
             엑셀 업로드
-            <input
-              className="sr-only"
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleUploadFile}
-            />
+            <input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleUploadFile} />
           </label>
           <button
             className="secondary-cta"
@@ -290,148 +298,227 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
             템플릿 다운로드
           </button>
         </div>
+
+        <div className="workspace-tab-bar">
+          {workspaceTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`workspace-tab ${workspaceTab === tab.key ? "workspace-tab-active" : ""}`}
+              type="button"
+              onClick={() => setWorkspaceTab(tab.key)}
+            >
+              <strong>{tab.label}</strong>
+              <span>{tab.description}</span>
+            </button>
+          ))}
+        </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="panel">
-          <div className="section-head">
-            <div>
-              <p className="section-kicker">요약</p>
-              <h2>한눈 요약</h2>
-            </div>
-            <span className="badge">{snapshot.holdingCount}개 종목</span>
-          </div>
+      <div className="inline-status-bar">
+        <p className="inline-status">{statusMessage}</p>
+      </div>
 
-          <div className="inline-status-bar">
-            <p className="inline-status">{statusMessage}</p>
-          </div>
-
-          <div className="portfolio-metric-grid mt-5">
-            <article className="portfolio-stat-card">
-              <span>실제 비중 합계</span>
-              <strong>{formatPct(snapshot.actualWeightSum)}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>목표 비중 합계</span>
-              <strong>{formatPct(snapshot.targetWeightSum)}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>테마 수</span>
-              <strong>{snapshot.themeCount}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>국가 수</span>
-              <strong>{snapshot.countries}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>국내 / 해외</span>
-              <strong>{domesticVsOverseas}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>상위 5종목 편중</span>
-              <strong>{formatPct(snapshot.topFiveWeight)}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>추가 매수 여력</span>
-              <strong>{snapshot.cashDrag > 0 ? formatPct(snapshot.cashDrag) : "0.00%"}</strong>
-            </article>
-            <article className="portfolio-stat-card">
-              <span>목표 초과 비중</span>
-              <strong>
-                {formatPct(
-                  snapshot.trimCandidates.reduce(
-                    (sum, row) => sum + (row.actualWeightPct - row.targetWeightPct),
-                    0,
-                  ),
-                )}
-              </strong>
-            </article>
-          </div>
-
-          <div className="portfolio-mix-grid mt-5">
-            <section className="portfolio-mix-card">
+      {workspaceTab === "overview" ? (
+        <>
+          <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <section className="panel">
               <div className="section-head">
                 <div>
-                  <p className="section-kicker">테마</p>
-                  <h2>상위 테마</h2>
+                  <p className="section-kicker">요약</p>
+                  <h2>한눈 요약</h2>
                 </div>
+                <span className="badge">{snapshot.holdingCount}개 종목</span>
               </div>
-              <div className="stack gap-3">
-                {topThemes.map((item) => (
-                  <div className="mix-row" key={item.label}>
+
+              <div className="portfolio-metric-grid mt-5">
+                <article className="portfolio-stat-card">
+                  <span>실제 비중 합계</span>
+                  <strong>{formatPct(snapshot.actualWeightSum)}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>목표 비중 합계</span>
+                  <strong>{formatPct(snapshot.targetWeightSum)}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>테마 수</span>
+                  <strong>{snapshot.themeCount}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>국가 수</span>
+                  <strong>{snapshot.countries}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>국내 / 해외</span>
+                  <strong>{domesticVsOverseas}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>상위 5종목 편중</span>
+                  <strong>{formatPct(snapshot.topFiveWeight)}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>추가 매수 여력</span>
+                  <strong>{snapshot.cashDrag > 0 ? formatPct(snapshot.cashDrag) : "0.00%"}</strong>
+                </article>
+                <article className="portfolio-stat-card">
+                  <span>목표 초과 비중</span>
+                  <strong>
+                    {formatPct(
+                      snapshot.trimCandidates.reduce(
+                        (sum, row) => sum + (row.actualWeightPct - row.targetWeightPct),
+                        0,
+                      ),
+                    )}
+                  </strong>
+                </article>
+              </div>
+
+              <div className="portfolio-mix-grid mt-5">
+                <section className="portfolio-mix-card">
+                  <div className="section-head">
                     <div>
-                      <strong>{item.label}</strong>
-                      <p>{formatPct(item.actualWeightPct)}</p>
+                      <p className="section-kicker">테마</p>
+                      <h2>상위 테마</h2>
                     </div>
-                    <span className="badge">{formatGap(item.actualWeightPct, item.targetWeightPct)}</span>
                   </div>
-                ))}
+                  <div className="stack gap-3">
+                    {topThemes.map((item) => (
+                      <div className="mix-row" key={item.label}>
+                        <div>
+                          <strong>{item.label}</strong>
+                          <p>{formatPct(item.actualWeightPct)}</p>
+                        </div>
+                        <span className="badge">{formatGap(item.actualWeightPct, item.targetWeightPct)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="portfolio-mix-card">
+                  <div className="section-head">
+                    <div>
+                      <p className="section-kicker">액션</p>
+                      <h2>액션 큐</h2>
+                    </div>
+                  </div>
+                  <div className="stack gap-3">
+                    {topActions.map((item) => (
+                      <div className={`mix-row mix-row-${actionTone(item.label)}`} key={item.label}>
+                        <div>
+                          <strong>{item.label}</strong>
+                          <p>{formatPct(item.actualWeightPct)}</p>
+                        </div>
+                        <span className={`badge action-badge action-badge-${actionTone(item.label)}`}>
+                          {formatPct(item.targetWeightPct)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </div>
             </section>
 
-            <section className="portfolio-mix-card">
-              <div className="section-head">
-                <div>
-                  <p className="section-kicker">액션</p>
-                  <h2>액션 큐</h2>
-                </div>
-              </div>
-              <div className="stack gap-3">
-                {topActions.map((item) => (
-                  <div className={`mix-row mix-row-${actionTone(item.label)}`} key={item.label}>
-                    <div>
-                      <strong>{item.label}</strong>
-                      <p>{formatPct(item.actualWeightPct)}</p>
-                    </div>
-                    <span className={`badge action-badge action-badge-${actionTone(item.label)}`}>
-                      {formatPct(item.targetWeightPct)}
-                    </span>
+            <aside className="stack gap-6">
+              <section className="panel">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">핵심</p>
+                    <h2>핵심 보유군</h2>
                   </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </section>
+                </div>
+                <div className="stack gap-3">
+                  {snapshot.coreHoldings.map((row) => (
+                    <article className="portfolio-holding-card" key={row.rowId}>
+                      <div className="dog-card-top">
+                        <div>
+                          <p className="dog-name">{row.name}</p>
+                          <p className="muted-copy">
+                            {row.marketScope} · {row.assetClass} · {row.theme}
+                          </p>
+                        </div>
+                        <span className="badge">{row.conviction || "미분류"}</span>
+                      </div>
+                      <div className="metric-grid">
+                        <div className="metric-card">
+                          <span>실제 비중</span>
+                          <strong>{formatPct(row.actualWeightPct)}</strong>
+                        </div>
+                        <div className="metric-card">
+                          <span>목표 비중</span>
+                          <strong>{formatPct(row.targetWeightPct)}</strong>
+                        </div>
+                      </div>
+                      <p className="muted-copy">{row.strategy || row.notes || "전략 메모 없음"}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </aside>
+          </section>
 
-        <aside className="stack gap-6">
           <section className="panel">
             <div className="section-head">
               <div>
-                <p className="section-kicker">핵심</p>
-                <h2>핵심 보유군</h2>
+                <p className="section-kicker">리밸런싱</p>
+                <h2>우선 확인 종목</h2>
               </div>
             </div>
-            <div className="stack gap-3">
-              {snapshot.coreHoldings.map((row) => (
-                <article className="portfolio-holding-card" key={row.rowId}>
-                  <div className="dog-card-top">
-                    <div>
-                      <p className="dog-name">{row.name}</p>
-                      <p className="muted-copy">
-                        {row.marketScope} · {row.assetClass} · {row.theme}
-                      </p>
-                    </div>
-                    <span className="badge">{row.conviction || "미분류"}</span>
+
+            <div className="portfolio-priority-grid mt-5">
+              <section className="portfolio-priority-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">매수</p>
+                    <h2>추가매수 우선순위</h2>
                   </div>
-                  <div className="metric-grid">
-                    <div className="metric-card">
-                      <span>실제 비중</span>
-                      <strong>{formatPct(row.actualWeightPct)}</strong>
-                    </div>
-                    <div className="metric-card">
-                      <span>목표 비중</span>
-                      <strong>{formatPct(row.targetWeightPct)}</strong>
-                    </div>
+                </div>
+                <div className="stack gap-2">
+                  {snapshot.buyCandidates.map((row) => (
+                    <button
+                      key={row.rowId}
+                      className="priority-row"
+                      type="button"
+                      onClick={() => selectRow(row)}
+                    >
+                      <div>
+                        <strong>{row.name}</strong>
+                        <p>{row.theme} · {row.marketScope}</p>
+                      </div>
+                      <span className="gap-pill gap-pill-buy">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="portfolio-priority-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">축소</p>
+                    <h2>비중축소 우선순위</h2>
                   </div>
-                  <p className="muted-copy">{row.strategy || row.notes || "전략 메모 없음"}</p>
-                </article>
-              ))}
+                </div>
+                <div className="stack gap-2">
+                  {snapshot.trimCandidates.map((row) => (
+                    <button
+                      key={row.rowId}
+                      className="priority-row"
+                      type="button"
+                      onClick={() => selectRow(row)}
+                    >
+                      <div>
+                        <strong>{row.name}</strong>
+                        <p>{row.theme} · {row.marketScope}</p>
+                      </div>
+                      <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
           </section>
-        </aside>
-      </section>
+        </>
+      ) : null}
 
-      <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      {workspaceTab === "positions" ? (
         <section className="panel">
           <div className="section-head">
             <div>
@@ -439,64 +526,6 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
               <h2>보유 종목 탐색</h2>
             </div>
             <span className="badge">{filteredRows.length}개 표시</span>
-          </div>
-
-          <div className="portfolio-priority-grid mt-5">
-            <section className="portfolio-priority-card">
-              <div className="section-head">
-                <div>
-                  <p className="section-kicker">리밸런싱</p>
-                  <h2>추가매수 우선순위</h2>
-                </div>
-              </div>
-              <div className="stack gap-2">
-                {snapshot.buyCandidates.map((row) => (
-                  <button
-                    key={row.rowId}
-                    className="priority-row"
-                    type="button"
-                    onClick={() => {
-                      setSelectedRowId(row.rowId);
-                      setDraft({ ...row });
-                    }}
-                  >
-                    <div>
-                      <strong>{row.name}</strong>
-                      <p>{row.theme} · {row.marketScope}</p>
-                    </div>
-                    <span className="gap-pill gap-pill-buy">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="portfolio-priority-card">
-              <div className="section-head">
-                <div>
-                  <p className="section-kicker">리밸런싱</p>
-                  <h2>비중축소 우선순위</h2>
-                </div>
-              </div>
-              <div className="stack gap-2">
-                {snapshot.trimCandidates.map((row) => (
-                  <button
-                    key={row.rowId}
-                    className="priority-row"
-                    type="button"
-                    onClick={() => {
-                      setSelectedRowId(row.rowId);
-                      setDraft({ ...row });
-                    }}
-                  >
-                    <div>
-                      <strong>{row.name}</strong>
-                      <p>{row.theme} · {row.marketScope}</p>
-                    </div>
-                    <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
           </div>
 
           <div className="portfolio-filter-row mt-5">
@@ -522,20 +551,12 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <select
-              className="portfolio-input"
-              value={scopeFilter}
-              onChange={(event) => setScopeFilter(event.target.value)}
-            >
+            <select className="portfolio-input" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}>
               <option value="전체">전체 지역</option>
               <option value="국내">국내</option>
               <option value="해외">해외</option>
             </select>
-            <select
-              className="portfolio-input"
-              value={actionFilter}
-              onChange={(event) => setActionFilter(event.target.value)}
-            >
+            <select className="portfolio-input" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
               <option value="전체">전체 액션</option>
               {snapshot.actionMix.map((item) => (
                 <option key={item.label} value={item.label}>
@@ -543,11 +564,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 </option>
               ))}
             </select>
-            <select
-              className="portfolio-input"
-              value={sortKey}
-              onChange={(event) => setSortKey(event.target.value)}
-            >
+            <select className="portfolio-input" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
               <option value="actual_desc">실제 비중순</option>
               <option value="target_desc">목표 비중순</option>
               <option value="gap_desc">언더웨이트 큰 순</option>
@@ -557,73 +574,77 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
             </select>
           </div>
 
-          <div className="portfolio-table-wrap mt-5">
-            <table className="portfolio-table">
-              <thead>
-                <tr>
-                  <th>종목</th>
-                  <th>지역</th>
-                  <th>자산</th>
-                  <th>테마</th>
-                  <th>전략</th>
-                  <th>추세</th>
-                  <th>실제</th>
-                  <th>목표</th>
-                  <th>갭</th>
-                  <th>액션</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => (
-                  <tr
-                    className={`portfolio-row portfolio-row-${actionTone(row.plannedAction)} ${
-                      selectedRow?.rowId === row.rowId ? "portfolio-row-selected" : ""
-                    }`}
-                    key={row.rowId}
-                    onClick={() => {
-                      setSelectedRowId(row.rowId);
-                      setDraft({ ...row });
-                    }}
-                  >
-                    <td>
-                      <strong>{row.name}</strong>
-                      <div className="subtle">{row.ticker}</div>
-                    </td>
-                    <td>{row.marketScope}</td>
-                    <td>{row.assetClass}</td>
-                    <td>
-                      <strong>{row.theme}</strong>
-                      <div className="subtle">{row.subTheme || "-"}</div>
-                    </td>
-                    <td>
-                      <strong>{row.strategy || "-"}</strong>
-                      <div className="subtle">{row.styleBucket || "-"}</div>
-                    </td>
-                    <td>
-                      <strong>{row.trendView || "-"}</strong>
-                      <div className="subtle">{row.cycleView || "-"}</div>
-                    </td>
-                    <td>{formatPct(row.actualWeightPct)}</td>
-                    <td>{formatPct(row.targetWeightPct)}</td>
-                    <td>
-                      <span className={`gap-pill gap-pill-${actionTone(row.plannedAction)}`}>
-                        {formatGap(row.actualWeightPct, row.targetWeightPct)}
-                      </span>
-                    </td>
-                    <td>
-                      <strong className={`action-label action-label-${actionTone(row.plannedAction)}`}>
-                        {row.plannedAction}
-                      </strong>
-                      <div className="subtle">{row.notes || "-"}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="position-card-grid mt-5">
+            {filteredRows.map((row) => (
+              <button
+                className={`position-card position-card-${actionTone(row.plannedAction)} ${
+                  selectedRow?.rowId === row.rowId ? "position-card-selected" : ""
+                }`}
+                key={row.rowId}
+                type="button"
+                onClick={() => selectRow(row)}
+              >
+                <div className="position-card-top">
+                  <div>
+                    <p className="dog-name">{row.name}</p>
+                    <p className="muted-copy">
+                      {row.ticker} · {row.marketScope} · {row.assetClass}
+                    </p>
+                  </div>
+                  <span className={`action-label action-label-${actionTone(row.plannedAction)}`}>
+                    {row.plannedAction}
+                  </span>
+                </div>
+
+                <div className="position-tag-row">
+                  <span className="portfolio-mini-tag">{row.theme}</span>
+                  <span className="portfolio-mini-tag">{row.subTheme || "세부테마 미입력"}</span>
+                  <span className="portfolio-mini-tag">{row.trendView || "추세 미입력"}</span>
+                </div>
+
+                <div className="position-metrics">
+                  <div>
+                    <span>실제</span>
+                    <strong>{formatPct(row.actualWeightPct)}</strong>
+                  </div>
+                  <div>
+                    <span>목표</span>
+                    <strong>{formatPct(row.targetWeightPct)}</strong>
+                  </div>
+                  <div>
+                    <span>갭</span>
+                    <strong>{formatGap(row.actualWeightPct, row.targetWeightPct)}</strong>
+                  </div>
+                </div>
+
+                <div className="position-detail-grid">
+                  <div>
+                    <span>전략</span>
+                    <strong>{row.strategy || "-"}</strong>
+                  </div>
+                  <div>
+                    <span>스타일</span>
+                    <strong>{row.styleBucket || "-"}</strong>
+                  </div>
+                  <div>
+                    <span>사이클</span>
+                    <strong>{row.cycleView || "-"}</strong>
+                  </div>
+                  <div>
+                    <span>타이밍</span>
+                    <strong>{row.timingView || "-"}</strong>
+                  </div>
+                </div>
+
+                <p className="position-note">{row.notes || "메모 없음"}</p>
+              </button>
+            ))}
           </div>
         </section>
+      ) : null}
 
-        <aside className="panel">
+      {workspaceTab === "editor" ? (
+        <section className="panel">
           <div className="section-head">
             <div>
               <p className="section-kicker">상세</p>
@@ -698,35 +719,19 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   <div className="portfolio-edit-grid">
                     <label className="portfolio-field">
                       <span>테마</span>
-                      <input
-                        className="portfolio-input"
-                        value={draft.theme}
-                        onChange={(event) => handleDraftChange("theme", event.target.value)}
-                      />
+                      <input className="portfolio-input" value={draft.theme} onChange={(event) => handleDraftChange("theme", event.target.value)} />
                     </label>
                     <label className="portfolio-field">
                       <span>세부 테마</span>
-                      <input
-                        className="portfolio-input"
-                        value={draft.subTheme}
-                        onChange={(event) => handleDraftChange("subTheme", event.target.value)}
-                      />
+                      <input className="portfolio-input" value={draft.subTheme} onChange={(event) => handleDraftChange("subTheme", event.target.value)} />
                     </label>
                     <label className="portfolio-field">
                       <span>전략</span>
-                      <input
-                        className="portfolio-input"
-                        value={draft.strategy}
-                        onChange={(event) => handleDraftChange("strategy", event.target.value)}
-                      />
+                      <input className="portfolio-input" value={draft.strategy} onChange={(event) => handleDraftChange("strategy", event.target.value)} />
                     </label>
                     <label className="portfolio-field">
                       <span>추세</span>
-                      <input
-                        className="portfolio-input"
-                        value={draft.trendView}
-                        onChange={(event) => handleDraftChange("trendView", event.target.value)}
-                      />
+                      <input className="portfolio-input" value={draft.trendView} onChange={(event) => handleDraftChange("trendView", event.target.value)} />
                     </label>
                     <label className="portfolio-field">
                       <span>실제 비중</span>
@@ -735,9 +740,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                         type="number"
                         step="0.01"
                         value={draft.actualWeightPct}
-                        onChange={(event) =>
-                          handleDraftChange("actualWeightPct", Number(event.target.value))
-                        }
+                        onChange={(event) => handleDraftChange("actualWeightPct", Number(event.target.value))}
                       />
                     </label>
                     <label className="portfolio-field">
@@ -747,18 +750,12 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                         type="number"
                         step="0.01"
                         value={draft.targetWeightPct}
-                        onChange={(event) =>
-                          handleDraftChange("targetWeightPct", Number(event.target.value))
-                        }
+                        onChange={(event) => handleDraftChange("targetWeightPct", Number(event.target.value))}
                       />
                     </label>
                     <label className="portfolio-field">
                       <span>액션</span>
-                      <select
-                        className="portfolio-input"
-                        value={draft.plannedAction}
-                        onChange={(event) => handleDraftChange("plannedAction", event.target.value)}
-                      >
+                      <select className="portfolio-input" value={draft.plannedAction} onChange={(event) => handleDraftChange("plannedAction", event.target.value)}>
                         <option value="추가매수 검토">추가매수 검토</option>
                         <option value="비중축소 검토">비중축소 검토</option>
                         <option value="정리 검토">정리 검토</option>
@@ -768,30 +765,17 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     </label>
                     <label className="portfolio-field">
                       <span>타이밍</span>
-                      <input
-                        className="portfolio-input"
-                        value={draft.timingView}
-                        onChange={(event) => handleDraftChange("timingView", event.target.value)}
-                      />
+                      <input className="portfolio-input" value={draft.timingView} onChange={(event) => handleDraftChange("timingView", event.target.value)} />
                     </label>
                     <label className="portfolio-field portfolio-field-wide">
                       <span>메모</span>
-                      <textarea
-                        className="portfolio-textarea"
-                        value={draft.notes}
-                        onChange={(event) => handleDraftChange("notes", event.target.value)}
-                      />
+                      <textarea className="portfolio-textarea" value={draft.notes} onChange={(event) => handleDraftChange("notes", event.target.value)} />
                     </label>
                     <div className="hero-actions">
                       <button className="primary-small" type="button" onClick={handleApplyDraft}>
                         화면 반영
                       </button>
-                      <button
-                        className="secondary-cta"
-                        type="button"
-                        onClick={handleSaveToFile}
-                        disabled={isSavingFile}
-                      >
+                      <button className="secondary-cta" type="button" onClick={handleSaveToFile} disabled={isSavingFile}>
                         {isSavingFile ? "저장 중..." : usesCloudStorage ? "클라우드 저장" : "로컬 저장"}
                       </button>
                     </div>
@@ -802,8 +786,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
           ) : (
             <p className="muted-copy">선택된 종목이 없습니다.</p>
           )}
-        </aside>
-      </section>
+        </section>
+      ) : null}
     </main>
   );
 }
