@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import * as XLSX from "xlsx";
 import { isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
 import { getPortfolioPositions } from "@/lib/repositories/portfolio";
@@ -25,14 +24,15 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
 
   for (const filePath of resolvePortfolioPaths()) {
     try {
-    const buffer = await readFile(filePath);
-    const workbook = XLSX.read(buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-      defval: "",
-      raw: false,
-    });
+      const { read, utils } = await import("xlsx");
+      const buffer = await readFile(filePath);
+      const workbook = read(buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const records = utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: "",
+        raw: false,
+      });
 
       return normalizePortfolioRecords(records);
     } catch {

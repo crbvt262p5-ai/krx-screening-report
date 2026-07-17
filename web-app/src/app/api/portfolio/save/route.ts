@@ -1,7 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
-import * as XLSX from "xlsx";
 import { hasSupabaseEnv, isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
 import { upsertPortfolioPositions } from "@/lib/repositories/portfolio";
@@ -60,8 +59,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(toExportRows(rows));
-    const csv = XLSX.utils.sheet_to_csv(worksheet);
+    const { utils } = await import("xlsx");
+    const worksheet = utils.json_to_sheet(toExportRows(rows));
+    const csv = utils.sheet_to_csv(worksheet);
     await writeFile(resolvePortfolioPath(), `\uFEFF${csv}`, "utf-8");
 
     return NextResponse.json({ ok: true, savedCount: rows.length, persistence: "csv" });

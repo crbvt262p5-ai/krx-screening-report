@@ -1,7 +1,6 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
   buildPortfolioSnapshot,
@@ -109,10 +108,11 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     }
 
     try {
+      const { read, utils } = await import("xlsx");
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
+      const workbook = read(buffer, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      const records = utils.sheet_to_json<Record<string, unknown>>(sheet, {
         defval: "",
         raw: false,
       });
@@ -157,11 +157,16 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
       planned_action: row.plannedAction,
       notes: row.notes,
     }));
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "portfolio");
-    XLSX.writeFile(workbook, "portfolio_dashboard_template.xlsx");
-    setStatusMessage("현재 화면 기준으로 엑셀 템플릿을 내려받았습니다.");
+    void (async () => {
+      const { utils, writeFile } = await import("xlsx");
+      const worksheet = utils.json_to_sheet(exportRows);
+      const workbook = utils.book_new();
+      utils.book_append_sheet(workbook, worksheet, "portfolio");
+      writeFile(workbook, "portfolio_dashboard_template.xlsx");
+      setStatusMessage("현재 화면 기준으로 엑셀 템플릿을 내려받았습니다.");
+    })().catch((error: unknown) => {
+      setStatusMessage(error instanceof Error ? error.message : "엑셀 파일 생성 중 문제가 발생했습니다.");
+    });
   }
 
   function handleDraftChange<K extends keyof PortfolioPosition>(key: K, value: PortfolioPosition[K]) {
