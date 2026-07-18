@@ -7,12 +7,36 @@ import {
   normalizePortfolioRecords,
   type PortfolioPosition,
 } from "@/lib/portfolio-dashboard";
+import {
+  buildScreeningLookup,
+  matchScreeningRecord,
+  type PortfolioScreeningRecord,
+} from "@/lib/portfolio-screening-shared";
 
 type PortfolioDashboardProps = {
   initialRows: PortfolioPosition[];
+  screeningRecords: PortfolioScreeningRecord[];
 };
 
 type WorkspaceTab = "overview" | "analysis" | "positions" | "editor";
+type ScreenedPortfolioPosition = PortfolioPosition & {
+  screening: PortfolioScreeningRecord | null;
+};
+type AdvisoryPortfolioPosition = PortfolioPosition & {
+  screening?: PortfolioScreeningRecord | null;
+};
+
+const INVESTOR_PROFILE = {
+  title: "밸류 우선 운영",
+  summary:
+    "저평가, 자산가치 재평가, 배당 지속성, 현금흐름 방어력을 우선하고 과열 추세 추격은 낮게 평가합니다.",
+  principles: [
+    "저PER·저PBR 또는 자산가치 할인 해소 가능성 우선",
+    "배당·현금흐름·주주환원 근거가 있으면 가점",
+    "고밸류 성장주는 실적 개선 근거 없으면 보수적으로",
+    "추세는 매수 근거가 아니라 진입 타이밍 보조 정도로만 사용",
+  ],
+} as const;
 
 function formatPct(value: number) {
   return `${value.toFixed(2)}%`;
@@ -37,116 +61,224 @@ function formatNumberValue(value: number | null) {
   return value.toLocaleString("ko-KR");
 }
 
-function buildValuationSignal(row: PortfolioPosition) {
-  if (row.per !== null && row.per <= 10) {
-    return `PER ${formatMultiple(row.per)}로 저평가 점검 구간에 가깝습니다.`;
+function formatScreeningScore(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "-";
   }
-  if (row.per !== null && row.per >= 25) {
-    return `PER ${formatMultiple(row.per)}로 밸류 부담이 커져 성장 지속 확인이 필요합니다.`;
-  }
-  if (row.forwardPer !== null && row.per !== null && row.forwardPer < row.per) {
-    return `Forward PER ${formatMultiple(row.forwardPer)}가 현재 PER보다 낮아 이익 개선 기대가 반영됩니다.`;
-  }
-  if (row.pbr !== null && row.pbr <= 1) {
-    return `PBR ${formatMultiple(row.pbr)}로 자산가치 대비 할인 여부를 같이 볼 수 있습니다.`;
-  }
-  if (row.per === null && row.pbr === null && row.forwardPer === null) {
-    return "밸류 지표가 아직 비어 있어 확대/축소 판단 근거가 약합니다.";
-  }
-  return "밸류 지표는 중립권으로 보여 추세와 포트 역할을 함께 봐야 합니다.";
+  return value.toFixed(1);
 }
 
-function buildActionReasons(row: PortfolioPosition) {
-  const reasons: string[] = [];
+function withScreeningFallback(row: PortfolioPosition, screening: PortfolioScreeningRecord | null): PortfolioPosition {
+  return {
+    ...row,
+    per: row.per ?? screening?.per ?? null,
+    pbr: row.pbr ?? screening?.pbr ?? null,
+  };
+}
+
+function hasIdentityUncertainty(row: AdvisoryPortfolioPosition) {
+  return (
+    row.notes.includes("정확한 법인명 확인 필요") ||
+    row.notes.includes("미확인") ||
+    (row.marketScope === "해외" && !row.screening && !/^[A-Z][A-Z0-9.\-=]{0,14}$/.test(row.ticker))
+  );
+}
+
+function screeningLabel(row: AdvisoryPortfolioPosition) {
+  if (hasIdentityUncertainty(row)) {
+    return "종목 확인 필요";
+  }
+  if (row.screening?.coreBucket) {
+    return row.screening.coreBucket;
+  }
+  if (row.screening?.recommendationBucket) {
+    return row.screening.recommendationBucket;
+  }
+  return "미연동";
+}
+
+function screeningReason(row: AdvisoryPortfolioPosition) {
+  return row.screening?.recommendationReasons || "";
+}
+
+function hasStrongValueDividendSupport(row: AdvisoryPortfolioPosition) {
+  return (
+    (row.screening?.valueScore ?? 0) >= 14 ||
+    (row.screening?.dividendYieldTrailing ?? 0) >= 4 ||
+    (row.pbr ?? row.screening?.pbr ?? 99) <= 0.6 ||
+    (row.per ?? row.screening?.per ?? 99) <= 6
+  );
+}
+
+function isUnscreenedMomentumGrowth(row: AdvisoryPortfolioPosition) {
+  return (
+    row.marketScope === "해외" &&
+    !row.screening &&
+    row.styleBucket === "성장" &&
+    (row.theme.includes("AI") || row.theme.includes("빅테크") || row.theme.includes("반도체"))
+  );
+}
+
+function hasValueSupport(row: AdvisoryPortfolioPosition) {
+  return (
+    (row.per !== null && row.per <= 12) ||
+    (row.pbr !== null && row.pbr <= 1.2) ||
+    hasStrongValueDividendSupport(row) ||
+    row.strategy.includes("Value") ||
+    row.strategy.includes("Dividend") ||
+    row.theme.includes("금융") ||
+    row.theme.includes("지주사") ||
+    row.theme.includes("배당") ||
+    row.theme.includes("자산")
+  );
+}
+
+function getScreeningBias(row: AdvisoryPortfolioPosition) {
+  let score = 0;
+
+  if (row.screening?.coreBucket === "Value Core") score += 5;
+  if (row.screening?.coreBucket === "Growth Core") score -= 1.5;
+  if (row.screening?.recommendationBucket === "실매수 검토") score += 3.5;
+  if (row.screening?.recommendationBucket === "소액 관찰") score += 1.2;
+  if (row.screening?.recommendationBucket === "가치함정 경고") score -= 4.2;
+  if (row.screening?.recommendationBucket === "제외") score -= 5.5;
+  if (row.screening?.stage === "과열") score -= 2;
+
+  if ((row.screening?.valueScore ?? 0) >= 14) score += 2.6;
+  else if ((row.screening?.valueScore ?? 0) >= 10) score += 1.3;
+
+  if ((row.screening?.valueTrapRiskScore ?? 0) >= 2.5) score -= 2.5;
+  if (hasIdentityUncertainty(row)) score -= 3.5;
+
+  return score;
+}
+
+function getValuationPreferenceScore(row: AdvisoryPortfolioPosition) {
+  let score = 0;
+
+  if (row.per !== null) {
+    if (row.per <= 8) score += 4.5;
+    else if (row.per <= 12) score += 3;
+    else if (row.per <= 18) score += 1.2;
+    else if (row.per >= 25) score -= 3;
+    else if (row.per >= 20) score -= 1.5;
+  }
+
+  if (row.pbr !== null) {
+    if (row.pbr <= 0.8) score += 3.5;
+    else if (row.pbr <= 1.2) score += 2.4;
+    else if (row.pbr <= 1.8) score += 0.8;
+    else if (row.pbr >= 3) score -= 2.2;
+  }
+
+  if (row.forwardPer !== null && row.per !== null) {
+    if (row.forwardPer < row.per * 0.9) score += 1.5;
+    else if (row.forwardPer > row.per * 1.1) score -= 0.8;
+  }
+
+  if (row.styleBucket === "인컴") score += 1;
+  if (row.strategy.includes("Value")) score += 2.2;
+  if (row.strategy.includes("Dividend")) score += 1.8;
+  if (row.theme.includes("지주사") || row.theme.includes("금융") || row.theme.includes("배당")) score += 1.2;
+  score += getScreeningBias(row);
+
+  return score;
+}
+
+function getHeatPenalty(row: AdvisoryPortfolioPosition) {
+  let penalty = 0;
+  if (row.trendView.includes("과열")) penalty += 1.8;
+  if (row.cycleView.includes("과열")) penalty += 1.6;
+  if (row.screening?.stage === "과열") penalty += 2.2;
+  if (row.styleBucket === "성장" && !hasValueSupport(row)) penalty += 1.2;
+  if ((row.per ?? 0) >= 25 && !row.strategy.includes("Value")) penalty += 1.2;
+  return penalty;
+}
+
+function getBuyPriorityScore(row: AdvisoryPortfolioPosition) {
+  const gap = row.targetWeightPct - row.actualWeightPct;
+  const valuationScore = getValuationPreferenceScore(row);
+  let score = valuationScore * 2.4;
+
+  if (hasIdentityUncertainty(row)) {
+    score -= 8;
+  }
+  if (row.screening?.recommendationBucket === "제외") {
+    score -= 10;
+  }
+  if (isUnscreenedMomentumGrowth(row)) {
+    score -= 9;
+  }
+
+  if (gap > 0) {
+    score += Math.min(4, gap * 1.5);
+  } else {
+    score -= Math.min(3, Math.abs(gap) * 1.1);
+  }
+
+  if (row.conviction === "핵심") score += 1.2;
+  if (row.plannedAction.includes("추가매수")) score += 1;
+  if (row.plannedAction.includes("보유")) score += 0.2;
+  if ((row.screening?.finalScore ?? 0) >= 28) score += 1.8;
+  if (hasStrongValueDividendSupport(row)) score += 4.5;
+  if ((row.screening?.dividendYieldTrailing ?? 0) >= 4) score += 2.4;
+  if ((row.screening?.returns6mPct ?? 0) <= 30 && (row.screening?.returns6mPct ?? 0) >= -20) score += 1.2;
+  score -= getHeatPenalty(row) * 1.6;
+
+  if (!hasValueSupport(row) && row.styleBucket === "성장") {
+    score -= 5.2;
+  }
+
+  return score;
+}
+
+function getTrimPriorityScore(row: AdvisoryPortfolioPosition) {
+  const overweight = row.actualWeightPct - row.targetWeightPct;
+  let score = getHeatPenalty(row) * 2.2 - getValuationPreferenceScore(row) * 1.6;
+
+  if (hasIdentityUncertainty(row) && overweight > 0) {
+    score += 2.4;
+  }
+
+  if (overweight > 0) {
+    score += Math.min(4, overweight * 1.6);
+  }
+
+  if (row.plannedAction.includes("비중축소") || row.plannedAction.includes("정리")) score += 1.4;
+  if (row.conviction === "위성") score += 0.8;
+  if (row.per !== null && row.per >= 25) score += 1.4;
+  if (row.pbr !== null && row.pbr >= 3) score += 1;
+  if (row.screening?.recommendationBucket === "가치함정 경고") score += 2.5;
+  if (row.screening?.recommendationBucket === "제외") score += 3.2;
+  if (hasStrongValueDividendSupport(row)) score -= 5.4;
+  if ((row.screening?.dividendYieldTrailing ?? 0) >= 4) score -= 2.6;
+  if ((row.screening?.returns6mPct ?? 0) <= 0) score -= 1.6;
+  if (row.screening?.recommendationBucket === "소액 관찰") score -= 1.4;
+  if (hasValueSupport(row) && row.trendView.includes("확인 필요")) score -= 0.8;
+
+  return score;
+}
+
+function buildDecisionSummary(row: AdvisoryPortfolioPosition) {
   const gap = row.actualWeightPct - row.targetWeightPct;
+  const valuationScore = getValuationPreferenceScore(row);
 
-  if (gap > 0.75) {
-    reasons.push(`현재 비중이 목표보다 ${gap.toFixed(2)}%p 높습니다.`);
-  } else if (gap < -0.75) {
-    reasons.push(`현재 비중이 목표보다 ${Math.abs(gap).toFixed(2)}%p 낮습니다.`);
+  if (hasIdentityUncertainty(row)) {
+    if (gap < 0) {
+      return `${row.name}은 종목 식별이 불완전해 추가매수 판단보다 먼저 정확한 티커 확인이 필요합니다.`;
+    }
+    return `${row.name}은 종목 식별이 불완전한 상태라 강한 매수/매도보다 확인 우선 종목으로 보는 편이 맞습니다.`;
   }
-
-  if (row.trendView.includes("과열")) {
-    reasons.push("추세가 과열 구간으로 표시돼 단기 과열 해소를 점검할 필요가 있습니다.");
-  } else if (row.trendView.includes("눌림")) {
-    reasons.push("추세가 눌림 구간이라면 분할 접근 논리를 붙이기 좋습니다.");
-  } else if (row.trendView.includes("확인 필요")) {
-    reasons.push("추세 확인이 끝나지 않아 비중을 서두르기보다 근거 보강이 먼저입니다.");
-  } else if (row.trendView.includes("진행")) {
-    reasons.push("추세 진행 상태라 방향성은 유지되지만 가격 위치는 따로 점검해야 합니다.");
-  }
-
-  if (row.cycleView.includes("과열")) {
-    reasons.push("사이클도 과열 구간으로 적혀 있어 수익 보호 논리가 생깁니다.");
-  } else if (row.cycleView.includes("주도") || row.cycleView.includes("상승")) {
-    reasons.push("사이클이 아직 상승 흐름이라 너무 빠른 축소는 기회비용이 생길 수 있습니다.");
-  }
-
-  if (row.conviction === "핵심") {
-    reasons.push("핵심 보유군이라 정리보다 목표 비중 복귀 중심으로 보는 편이 자연스럽습니다.");
-  } else if (row.conviction === "위성") {
-    reasons.push("위성 포지션이라면 기준 이탈 시 더 빠른 축소 판단이 가능합니다.");
-  }
-
-  if (row.styleBucket === "인컴") {
-    reasons.push("인컴 자산은 배당/현금흐름 역할을 같이 봐야 해서 비중 조정이 더 보수적이어야 합니다.");
-  } else if (row.styleBucket === "성장") {
-    reasons.push("성장 자산은 추세와 실적 기대를 함께 봐야 하므로 변동성 관리가 중요합니다.");
-  } else if (row.styleBucket === "패시브") {
-    reasons.push("패시브 자산이라 개별 종목보다 테마·지역 익스포저 조절 관점이 더 중요합니다.");
-  }
-
-  reasons.push(buildValuationSignal(row));
-
-  if (row.notes) {
-    reasons.push(`메모 반영: ${row.notes}`);
-  }
-
-  return reasons.slice(0, 4);
-}
-
-function buildOutlook(row: PortfolioPosition) {
-  if (row.trendView.includes("과열") && row.plannedAction.includes("비중축소")) {
-    return "상승 추세는 살아 있어도 단기 과열 해소 구간을 염두에 둔 관리형 축소가 어울립니다.";
-  }
-  if (row.trendView.includes("진행") && row.plannedAction.includes("추가매수")) {
-    return "방향성은 우호적이라 눌림 확인 시 비중을 천천히 늘리는 시나리오가 자연스럽습니다.";
-  }
-  if (row.trendView.includes("확인 필요")) {
-    return "지금은 전망 확신보다 체크리스트 보강이 우선이라 관찰 강도가 더 중요합니다.";
-  }
-  return "현재 분류상으로는 추세와 목표 비중의 균형을 맞추는 운영이 우선입니다.";
-}
-
-function buildValuationLens(row: PortfolioPosition) {
-  if (row.per !== null || row.pbr !== null || row.forwardPer !== null) {
-    const perText = row.per !== null ? `PER ${formatMultiple(row.per)}` : "PER 미입력";
-    const pbrText = row.pbr !== null ? `PBR ${formatMultiple(row.pbr)}` : "PBR 미입력";
-    const forwardText =
-      row.forwardPer !== null ? `Forward PER ${formatMultiple(row.forwardPer)}` : "Forward PER 미입력";
-    return `${perText} · ${pbrText} · ${forwardText}`;
-  }
-  if (row.strategy.includes("Value") || row.theme.includes("금융") || row.theme.includes("지주사")) {
-    return "밸류 관점에서는 할인 해소 여지와 자산가치 재평가가 핵심 근거입니다.";
-  }
-  if (row.styleBucket === "성장" || row.theme.includes("AI") || row.theme.includes("반도체")) {
-    return "밸류보다 성장 지속성, 실적 모멘텀, 주도주 프리미엄이 더 중요한 구간입니다.";
-  }
-  if (row.styleBucket === "인컴") {
-    return "밸류는 배당 지속성과 현금흐름 방어력으로 해석하는 편이 더 맞습니다.";
-  }
-  return "절대 밸류보다 포트 역할과 목표 비중 적합성이 더 중요한 종목으로 보입니다.";
-}
-
-function buildDecisionSummary(row: PortfolioPosition) {
-  const gap = row.actualWeightPct - row.targetWeightPct;
 
   if (row.plannedAction.includes("비중축소") || row.plannedAction.includes("정리")) {
-    if (row.per !== null && row.per >= 25) {
+    if (row.screening?.recommendationBucket === "제외" || row.screening?.recommendationBucket === "가치함정 경고") {
+      return `${row.name}은 스크리닝에서 ${row.screening.recommendationBucket}로 잡혀, 포트 축소 후보로 보는 근거가 분명합니다.`;
+    }
+    if (valuationScore <= -2) {
       return `${row.name}은 밸류 부담과 초과 비중이 겹쳐, 비중 축소 의견이 더 설득력 있습니다.`;
     }
     if (row.trendView.includes("과열") || row.cycleView.includes("과열")) {
-      return `${row.name}은 과열 신호와 목표 초과 비중이 겹쳐, 수익 보호를 위한 축소 의견입니다.`;
+      return `${row.name}은 과열 구간이지만, 이 화면에서는 추세보다 밸류 부담과 오버웨이트 관리가 핵심 축소 근거입니다.`;
     }
     if (gap > 0) {
       return `${row.name}은 목표보다 ${gap.toFixed(2)}%p 무거워 포트 균형 복귀 목적의 축소 의견입니다.`;
@@ -155,14 +287,23 @@ function buildDecisionSummary(row: PortfolioPosition) {
   }
 
   if (row.plannedAction.includes("추가매수")) {
+    if (isUnscreenedMomentumGrowth(row)) {
+      return `${row.name}은 언더웨이트여도 현재 로직에서는 모멘텀 성장주로 분류돼, 네 성향 기준 추가매수 우선순위에서 뒤로 밀립니다.`;
+    }
+    if (row.screening?.coreBucket === "Value Core" && row.screening?.recommendationBucket === "실매수 검토") {
+      return `${row.name}은 스크리닝에서도 Value Core 실매수 검토로 잡혀, 네 성향과 가장 맞는 추가매수 후보입니다.`;
+    }
+    if (valuationScore >= 6) {
+      return `${row.name}은 밸류 할인과 포트 역할이 맞물려, 추세보다 가격 메리트 중심의 확대 검토 의견입니다.`;
+    }
     if (row.per !== null && row.forwardPer !== null && row.forwardPer < row.per) {
       return `${row.name}은 목표 비중보다 가볍고 선행 밸류가 개선돼 확대 검토 의견입니다.`;
     }
     if (gap < 0) {
       return `${row.name}은 목표보다 ${Math.abs(gap).toFixed(2)}%p 가벼워 비중 복원 목적의 확대 의견입니다.`;
     }
-    if (row.trendView.includes("진행") || row.cycleView.includes("상승") || row.cycleView.includes("주도")) {
-      return `${row.name}은 추세와 사이클이 살아 있어 눌림 확인 시 확대 가능한 의견입니다.`;
+    if (!hasValueSupport(row)) {
+      return `${row.name}은 현재 추세보다 밸류 근거가 약해, 확대보다 관찰 쪽이 더 자연스러워 보입니다.`;
     }
     return `${row.name}은 포트 역할 대비 현재 비중이 부족해 보여 추가 검토 의견입니다.`;
   }
@@ -174,10 +315,136 @@ function buildDecisionSummary(row: PortfolioPosition) {
   return `${row.name}은 현재 비중을 급히 움직이기보다 유지 쪽이 더 자연스러운 의견입니다.`;
 }
 
-function buildPortfolioNarrative(rows: PortfolioPosition[], snapshot: ReturnType<typeof buildPortfolioSnapshot>) {
+function buildAnalysisVerdict(row: AdvisoryPortfolioPosition) {
+  if (hasIdentityUncertainty(row)) {
+    return "판단 보류";
+  }
+  if (row.screening?.recommendationBucket === "제외") {
+    return "확대 비추천";
+  }
+  if (row.screening?.recommendationBucket === "가치함정 경고") {
+    return "함정 주의";
+  }
+  if (row.screening?.coreBucket === "Value Core" && row.screening?.recommendationBucket === "실매수 검토") {
+    return "가치 매수 후보";
+  }
+  if (hasStrongValueDividendSupport(row) && row.targetWeightPct > row.actualWeightPct) {
+    return "가치 관찰 강화";
+  }
+  if (row.actualWeightPct > row.targetWeightPct) {
+    return "비중 관리 우선";
+  }
+  return "중립";
+}
+
+function buildCriteriaRows(row: AdvisoryPortfolioPosition) {
+  return [
+    {
+      label: "밸류",
+      value:
+        row.screening?.valueScore !== null && row.screening?.valueScore !== undefined
+          ? `Value ${formatScreeningScore(row.screening.valueScore)}`
+          : row.per !== null || row.pbr !== null
+            ? `${formatMultiple(row.per)} / ${formatMultiple(row.pbr)}`
+            : "근거 약함",
+      tone:
+        hasStrongValueDividendSupport(row) ? "positive" : (row.screening?.recommendationBucket === "가치함정 경고" ? "negative" : "neutral"),
+    },
+    {
+      label: "배당·현금흐름",
+      value:
+        row.screening?.dividendYieldTrailing !== null && row.screening?.dividendYieldTrailing !== undefined
+          ? `배당 ${formatPct(row.screening.dividendYieldTrailing)}`
+          : row.styleBucket === "인컴"
+            ? "인컴 성격"
+            : "보통",
+      tone: (row.screening?.dividendYieldTrailing ?? 0) >= 4 || row.styleBucket === "인컴" ? "positive" : "neutral",
+    },
+    {
+      label: "스크리닝 판정",
+      value: screeningLabel(row),
+      tone:
+        row.screening?.recommendationBucket === "제외" || row.screening?.recommendationBucket === "가치함정 경고"
+          ? "negative"
+          : row.screening?.coreBucket === "Value Core"
+            ? "positive"
+            : "neutral",
+    },
+    {
+      label: "과열·추격",
+      value: row.screening?.stage || row.trendView || "중립",
+      tone:
+        row.screening?.stage === "과열" || row.trendView.includes("과열")
+          ? "negative"
+          : row.trendView.includes("확인 필요")
+            ? "neutral"
+            : "positive",
+    },
+    {
+      label: "비중 상태",
+      value:
+        row.targetWeightPct > row.actualWeightPct
+          ? `언더 ${formatGap(row.actualWeightPct, row.targetWeightPct)}`
+          : row.actualWeightPct > row.targetWeightPct
+            ? `오버 ${formatGap(row.actualWeightPct, row.targetWeightPct)}`
+            : "중립",
+      tone:
+        row.targetWeightPct > row.actualWeightPct && hasValueSupport(row)
+          ? "positive"
+          : row.actualWeightPct > row.targetWeightPct
+            ? "negative"
+            : "neutral",
+    },
+  ];
+}
+
+function buildWeaknessLabel(row: AdvisoryPortfolioPosition) {
+  if (hasIdentityUncertainty(row)) {
+    return "정확한 종목 식별이 먼저 필요합니다.";
+  }
+  if (row.screening?.recommendationBucket === "제외") {
+    return "스크리닝에서 제외되어 신규 확대 근거가 약합니다.";
+  }
+  if (row.screening?.recommendationBucket === "가치함정 경고") {
+    return "저평가처럼 보여도 함정 가능성을 먼저 점검해야 합니다.";
+  }
+  if (isUnscreenedMomentumGrowth(row)) {
+    return "성장/모멘텀 스토리 대비 네 성향과 맞는 가치 근거가 약합니다.";
+  }
+  if ((row.screening?.dividendYieldTrailing ?? 0) < 1 && !hasStrongValueDividendSupport(row)) {
+    return "배당·현금흐름 방어 근거가 약합니다.";
+  }
+  return "핵심 반대 근거는 약하지만, 확신을 줄 만한 결정적 근거도 더 필요합니다.";
+}
+
+function buildChecklist(row: AdvisoryPortfolioPosition) {
+  if (hasIdentityUncertainty(row)) {
+    return "법인명/티커 확정";
+  }
+  if (row.screening?.recommendationBucket === "제외") {
+    return "과열 해소 여부 확인";
+  }
+  if (row.screening?.recommendationBucket === "가치함정 경고") {
+    return "함정 사유 재검토";
+  }
+  if (hasStrongValueDividendSupport(row) && row.targetWeightPct > row.actualWeightPct) {
+    return "실적/배당 유지 확인 후 분할";
+  }
+  if (row.actualWeightPct > row.targetWeightPct) {
+    return "비중 정상화 여부 점검";
+  }
+  return "근거 보강 후 유지 판단";
+}
+
+function buildPortfolioNarrative(
+  rows: ScreenedPortfolioPosition[],
+  snapshot: ReturnType<typeof buildPortfolioSnapshot>,
+  buyCandidates: ScreenedPortfolioPosition[],
+  trimCandidates: ScreenedPortfolioPosition[],
+) {
   const topTheme = snapshot.themeMix[0];
-  const topTrim = snapshot.trimCandidates[0];
-  const topBuy = snapshot.buyCandidates[0];
+  const topTrim = trimCandidates[0];
+  const topBuy = buyCandidates[0];
   const narratives: string[] = [];
 
   if (topTheme) {
@@ -190,15 +457,17 @@ function buildPortfolioNarrative(rows: PortfolioPosition[], snapshot: ReturnType
   }
   narratives.push(`국내/해외 비중은 ${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}입니다.`);
   if (topTrim) {
-    narratives.push(`${topTrim.name}은 목표 초과폭이 커서 우선 축소 후보로 보입니다.`);
+    narratives.push(`${topTrim.name}은 추세 때문이 아니라 밸류 부담 또는 오버웨이트 관리 차원에서 축소 후보로 보입니다.`);
   }
   if (topBuy) {
-    narratives.push(`${topBuy.name}은 목표 미달폭이 커서 추가 검토 1순위 후보입니다.`);
+    narratives.push(`${topBuy.name}은 목표 미달폭보다 밸류 근거가 더 탄탄해 추가 검토 1순위 후보입니다.`);
   }
   const valuationCoverage = rows.filter(
     (row) => row.per !== null || row.pbr !== null || row.forwardPer !== null || row.eps !== null,
   ).length;
   narratives.push(`밸류 지표가 입력된 종목은 ${valuationCoverage}개로, 이 숫자가 많을수록 의견 설명의 설득력이 올라갑니다.`);
+  const screeningCoverage = rows.filter((row) => row.screening !== null).length;
+  narratives.push(`스크리닝 시스템과 연결된 종목은 ${screeningCoverage}개이며, 국내 종목 의견은 이 결과를 우선 반영합니다.`);
   return narratives;
 }
 
@@ -219,7 +488,7 @@ function buildDonutStyle(items: Array<{ actualWeightPct: number }>, colors: stri
   return { background: `conic-gradient(${stops.join(", ")})` };
 }
 
-export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
+export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioDashboardProps) {
   const usesCloudStorage = hasSupabaseEnv();
   const [rows, setRows] = useState(initialRows);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("overview");
@@ -229,19 +498,35 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
   const [tabFilter, setTabFilter] = useState("전체");
   const [sortKey, setSortKey] = useState("actual_desc");
   const [selectedRowId, setSelectedRowId] = useState(initialRows[0]?.rowId ?? "");
-  const [draft, setDraft] = useState<PortfolioPosition | null>(initialRows[0] ?? null);
+  const initialLookup = buildScreeningLookup(screeningRecords);
+  const [draft, setDraft] = useState<PortfolioPosition | null>(
+    initialRows[0] ? withScreeningFallback(initialRows[0], matchScreeningRecord(initialRows[0], initialLookup)) : null,
+  );
   const [isSavingFile, setIsSavingFile] = useState(false);
+  const [isEnrichingValuation, setIsEnrichingValuation] = useState(false);
   const [statusMessage, setStatusMessage] = useState(
     usesCloudStorage
       ? "현재 포트를 불러왔어요. 수정 후 클라우드 저장하면 배포 환경에서도 그대로 유지됩니다."
       : "현재 포트 CSV를 기본으로 불러왔어요. 엑셀이나 CSV를 올리면 바로 화면이 바뀝니다.",
   );
   const deferredQuery = useDeferredValue(query);
+  const screeningLookup = useMemo(() => buildScreeningLookup(screeningRecords), [screeningRecords]);
+  const displayRows = useMemo<ScreenedPortfolioPosition[]>(
+    () =>
+      rows.map((row) => {
+        const screening = matchScreeningRecord(row, screeningLookup);
+        return {
+          ...withScreeningFallback(row, screening),
+          screening,
+        };
+      }),
+    [rows, screeningLookup],
+  );
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = deferredQuery.trim().toLowerCase();
 
-    const nextRows = rows.filter((row) => {
+    const nextRows = displayRows.filter((row) => {
       const matchesQuery =
         !normalizedQuery ||
         `${row.name} ${row.ticker} ${row.theme} ${row.strategy}`.toLowerCase().includes(normalizedQuery);
@@ -278,9 +563,9 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     });
 
     return nextRows;
-  }, [actionFilter, deferredQuery, rows, scopeFilter, sortKey, tabFilter]);
+  }, [actionFilter, deferredQuery, displayRows, scopeFilter, sortKey, tabFilter]);
 
-  const snapshot = useMemo(() => buildPortfolioSnapshot(rows), [rows]);
+  const snapshot = useMemo(() => buildPortfolioSnapshot(displayRows), [displayRows]);
   const quickTabs = ["전체", "핵심 보유", "추가매수", "비중축소", "관찰"];
   const workspaceTabs = [
     { key: "overview", label: "개요", description: "요약과 리밸런싱 우선순위" },
@@ -289,8 +574,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     { key: "editor", label: "편집", description: "선택 종목 상세 수정" },
   ] as const;
   const selectedRow =
-    rows.find((row) => row.rowId === selectedRowId) ??
-    rows[0] ??
+    displayRows.find((row) => row.rowId === selectedRowId) ??
+    displayRows[0] ??
     null;
 
   function actionTone(action: string) {
@@ -306,9 +591,10 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     return "hold";
   }
 
-  function selectRow(row: PortfolioPosition, nextTab: "positions" | "editor" = "editor") {
+  function selectRow(row: ScreenedPortfolioPosition, nextTab: "positions" | "editor" = "editor") {
     setSelectedRowId(row.rowId);
-    setDraft({ ...row });
+    const baseRow = rows.find((item) => item.rowId === row.rowId) ?? null;
+    setDraft(baseRow ? withScreeningFallback(baseRow, row.screening) : null);
     setWorkspaceTab(nextTab);
   }
 
@@ -336,7 +622,11 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
 
       setRows(nextRows);
       setSelectedRowId(nextRows[0]?.rowId ?? "");
-      setDraft(nextRows[0] ? { ...nextRows[0] } : null);
+      setDraft(
+        nextRows[0]
+          ? withScreeningFallback(nextRows[0], matchScreeningRecord(nextRows[0], screeningLookup))
+          : null,
+      );
       setStatusMessage(`${file.name} 파일에서 ${nextRows.length}개 종목을 불러왔습니다.`);
     } catch (error) {
       setStatusMessage(
@@ -388,6 +678,76 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
 
   function handleDraftChange<K extends keyof PortfolioPosition>(key: K, value: PortfolioPosition[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  async function handleEnrichValuation() {
+    setIsEnrichingValuation(true);
+
+    try {
+      const response = await fetch("/api/portfolio/enrich", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rows }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            rows?: PortfolioPosition[];
+            items?: Array<{
+              status: "updated" | "unchanged" | "skipped" | "unresolved";
+              name: string;
+            }>;
+            summary?: {
+              updatedCount: number;
+              unchangedCount: number;
+              skippedCount: number;
+              unresolvedCount: number;
+            };
+            error?: string;
+          }
+        | null;
+
+      if (!response.ok || !payload?.rows || !payload.summary) {
+        throw new Error(payload?.error ?? "밸류 자동 채우기 중 문제가 발생했습니다.");
+      }
+
+      setRows(payload.rows);
+
+      const nextSelectedRow =
+        payload.rows.find((row) => row.rowId === selectedRowId) ??
+        payload.rows[0] ??
+        null;
+
+      setSelectedRowId(nextSelectedRow?.rowId ?? "");
+      setDraft(
+        nextSelectedRow
+          ? withScreeningFallback(nextSelectedRow, matchScreeningRecord(nextSelectedRow, screeningLookup))
+          : null,
+      );
+
+      const unresolvedNames = (payload.items ?? [])
+        .filter((item) => item.status === "unresolved")
+        .slice(0, 3)
+        .map((item) => item.name);
+
+      const unresolvedTail =
+        unresolvedNames.length > 0
+          ? ` 자동 연결이 어려운 종목: ${unresolvedNames.join(", ")}${payload.summary.unresolvedCount > unresolvedNames.length ? " 외" : ""}.`
+          : "";
+
+      setStatusMessage(
+        `밸류 자동 채우기 완료. 업데이트 ${payload.summary.updatedCount}개, 유지 ${payload.summary.unchangedCount}개, ETF 스킵 ${payload.summary.skippedCount}개, 미해결 ${payload.summary.unresolvedCount}개.${unresolvedTail}`,
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : "밸류 자동 채우기 중 문제가 발생했습니다.",
+      );
+    } finally {
+      setIsEnrichingValuation(false);
+    }
   }
 
   function handleApplyDraft() {
@@ -466,11 +826,33 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
     .join(" · ");
   const topThemeCategories = snapshot.themeCategoryMix.slice(0, 3);
   const domesticVsOverseas = `${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}`;
+  const screeningConnectedCount = displayRows.filter((row) => row.screening !== null).length;
+  const buyCandidates = useMemo(
+    () =>
+      [...displayRows]
+        .filter(
+          (row) =>
+            (row.targetWeightPct > row.actualWeightPct || row.plannedAction.includes("추가매수")) &&
+            !hasIdentityUncertainty(row) &&
+            row.screening?.recommendationBucket !== "제외",
+        )
+        .sort((left, right) => getBuyPriorityScore(right) - getBuyPriorityScore(left))
+        .slice(0, 5),
+    [displayRows],
+  );
+  const trimCandidates = useMemo(
+    () =>
+      [...displayRows]
+        .filter((row) => row.actualWeightPct > row.targetWeightPct || row.plannedAction.includes("비중축소") || row.plannedAction.includes("정리"))
+        .sort((left, right) => getTrimPriorityScore(right) - getTrimPriorityScore(left))
+        .slice(0, 5),
+    [displayRows],
+  );
   const analysisThemeMix = snapshot.themeMix.slice(0, 5);
   const analysisRegionMix = snapshot.regionMix.slice(0, 3);
   const themeChartStyle = buildDonutStyle(analysisThemeMix, ["#1f6feb", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444"]);
   const regionChartStyle = buildDonutStyle(analysisRegionMix, ["#174ea6", "#06b6d4", "#94a3b8"]);
-  const portfolioNarrative = buildPortfolioNarrative(rows, snapshot);
+  const portfolioNarrative = buildPortfolioNarrative(displayRows, snapshot, buyCandidates, trimCandidates);
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -480,8 +862,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
           <div className="space-y-2">
             <h1 className="hero-title">포트 조정용 운영 화면</h1>
             <p className="hero-copy">
-              장식은 줄이고 정보 밀도는 높였습니다. 기술적 흐름만이 아니라 테마군과 밸류 지표까지
-              함께 보면서 확대·축소 의견을 판단하는 구조입니다.
+              장식은 줄이고 정보 밀도는 높였습니다. 이제는 기술적 흐름보다 밸류 지표와
+              `krx_screening`의 실제 스크리닝 결과를 우선 반영해 확대·축소 의견을 판단합니다.
             </p>
           </div>
           <p className="hero-inline-note">상위 테마: {topThemeSummary}</p>
@@ -492,13 +874,20 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
             엑셀 업로드
             <input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleUploadFile} />
           </label>
+          <button className="secondary-cta" type="button" onClick={handleEnrichValuation} disabled={isEnrichingValuation}>
+            {isEnrichingValuation ? "밸류 채우는 중..." : "밸류 자동 채우기"}
+          </button>
           <button
             className="secondary-cta"
             type="button"
             onClick={() => {
               setRows(initialRows);
               setSelectedRowId(initialRows[0]?.rowId ?? "");
-              setDraft(initialRows[0] ? { ...initialRows[0] } : null);
+              setDraft(
+                initialRows[0]
+                  ? withScreeningFallback(initialRows[0], matchScreeningRecord(initialRows[0], screeningLookup))
+                  : null,
+              );
               setStatusMessage("기본 portfolio_positions.csv 기준으로 다시 돌려놨어요.");
             }}
           >
@@ -530,8 +919,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
 
       {workspaceTab === "overview" ? (
         <>
-          <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-            <section className="panel">
+          <section className="overview-hero-grid">
+            <section className="panel overview-summary-panel">
               <div className="section-head">
                 <div>
                   <p className="section-kicker">요약</p>
@@ -540,7 +929,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 <span className="badge">{snapshot.holdingCount}개 종목</span>
               </div>
 
-              <div className="portfolio-metric-grid mt-5">
+              <div className="portfolio-metric-grid portfolio-metric-grid-balanced mt-5">
                 <article className="portfolio-stat-card">
                   <span>실제 비중 합계</span>
                   <strong>{formatPct(snapshot.actualWeightSum)}</strong>
@@ -562,6 +951,12 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   <strong>{snapshot.countries}</strong>
                 </article>
                 <article className="portfolio-stat-card">
+                  <span>스크리닝 연동</span>
+                  <strong>
+                    {screeningConnectedCount} / {displayRows.length}
+                  </strong>
+                </article>
+                <article className="portfolio-stat-card">
                   <span>국내 / 해외</span>
                   <strong>{domesticVsOverseas}</strong>
                 </article>
@@ -577,7 +972,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   <span>목표 초과 비중</span>
                   <strong>
                     {formatPct(
-                      snapshot.trimCandidates.reduce(
+                      trimCandidates.reduce(
                         (sum, row) => sum + (row.actualWeightPct - row.targetWeightPct),
                         0,
                       ),
@@ -585,7 +980,73 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </strong>
                 </article>
               </div>
+            </section>
 
+            <aside className="panel overview-core-panel">
+              <div className="section-head">
+                <div>
+                  <p className="section-kicker">핵심</p>
+                  <h2>핵심 보유군</h2>
+                </div>
+                <span className="badge">상위 3개</span>
+              </div>
+              <div className="stack gap-3 mt-5">
+                {snapshot.coreHoldings.slice(0, 3).map((row) => (
+                  <article className="portfolio-holding-card portfolio-holding-card-compact" key={row.rowId}>
+                    <div className="dog-card-top">
+                      <div>
+                        <p className="dog-name">{row.name}</p>
+                        <p className="muted-copy">
+                          {row.marketScope} · {row.assetClass} · {row.theme}
+                        </p>
+                        <p className="muted-copy">{screeningLabel(row)}</p>
+                      </div>
+                      <span className="badge">{row.conviction || "미분류"}</span>
+                    </div>
+                    <div className="metric-grid">
+                      <div className="metric-card">
+                        <span>실제 비중</span>
+                        <strong>{formatPct(row.actualWeightPct)}</strong>
+                      </div>
+                      <div className="metric-card">
+                        <span>목표 비중</span>
+                        <strong>{formatPct(row.targetWeightPct)}</strong>
+                      </div>
+                    </div>
+                    <p className="muted-copy">{row.strategy || row.notes || "전략 메모 없음"}</p>
+                  </article>
+                ))}
+              </div>
+            </aside>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-2">
+            <section className="panel">
+              <div className="section-head">
+                <div>
+                  <p className="section-kicker">운용 원칙</p>
+                  <h2>{INVESTOR_PROFILE.title}</h2>
+                </div>
+              </div>
+              <div className="investment-profile-card mt-5">
+                <p>{INVESTOR_PROFILE.summary}</p>
+                <div className="investment-principle-list">
+                  {INVESTOR_PROFILE.principles.map((principle) => (
+                    <article className="investment-principle-item" key={principle}>
+                      <span />
+                      <strong>{principle}</strong>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+            <section className="panel">
+              <div className="section-head">
+                <div>
+                  <p className="section-kicker">구성</p>
+                  <h2>테마와 액션 요약</h2>
+                </div>
+              </div>
               <div className="portfolio-mix-grid mt-5">
                 <section className="portfolio-mix-card">
                   <div className="section-head">
@@ -630,43 +1091,6 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                 </section>
               </div>
             </section>
-
-            <aside className="stack gap-6">
-              <section className="panel">
-                <div className="section-head">
-                  <div>
-                    <p className="section-kicker">핵심</p>
-                    <h2>핵심 보유군</h2>
-                  </div>
-                </div>
-                <div className="stack gap-3">
-                  {snapshot.coreHoldings.map((row) => (
-                    <article className="portfolio-holding-card" key={row.rowId}>
-                      <div className="dog-card-top">
-                        <div>
-                          <p className="dog-name">{row.name}</p>
-                          <p className="muted-copy">
-                            {row.marketScope} · {row.assetClass} · {row.theme}
-                          </p>
-                        </div>
-                        <span className="badge">{row.conviction || "미분류"}</span>
-                      </div>
-                      <div className="metric-grid">
-                        <div className="metric-card">
-                          <span>실제 비중</span>
-                          <strong>{formatPct(row.actualWeightPct)}</strong>
-                        </div>
-                        <div className="metric-card">
-                          <span>목표 비중</span>
-                          <strong>{formatPct(row.targetWeightPct)}</strong>
-                        </div>
-                      </div>
-                      <p className="muted-copy">{row.strategy || row.notes || "전략 메모 없음"}</p>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            </aside>
           </section>
 
           <section className="panel">
@@ -686,7 +1110,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </div>
                 </div>
                 <div className="stack gap-2">
-                  {snapshot.buyCandidates.map((row) => (
+                  {buyCandidates.map((row) => (
                     <button
                       key={row.rowId}
                       className="priority-row"
@@ -695,7 +1119,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     >
                       <div>
                         <strong>{row.name}</strong>
-                        <p>{buildDecisionSummary(row)}</p>
+                          <p>{buildDecisionSummary(row)}</p>
+                          <p className="muted-copy">{screeningLabel(row)}</p>
                       </div>
                       <span className="gap-pill gap-pill-buy">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
@@ -711,7 +1136,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </div>
                 </div>
                 <div className="stack gap-2">
-                  {snapshot.trimCandidates.map((row) => (
+                  {trimCandidates.map((row) => (
                     <button
                       key={row.rowId}
                       className="priority-row"
@@ -720,7 +1145,8 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     >
                       <div>
                         <strong>{row.name}</strong>
-                        <p>{buildDecisionSummary(row)}</p>
+                          <p>{buildDecisionSummary(row)}</p>
+                          <p className="muted-copy">{screeningLabel(row)}</p>
                       </div>
                       <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
@@ -831,7 +1257,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </div>
                 </div>
                 <div className="stack gap-4">
-                  {snapshot.trimCandidates.map((row) => (
+                  {trimCandidates.map((row) => (
                     <article className="analysis-security-card" key={row.rowId}>
                       <div className="position-card-top">
                         <div>
@@ -839,23 +1265,37 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                           <p className="muted-copy">
                             {row.theme} · {row.marketScope} · {formatGap(row.actualWeightPct, row.targetWeightPct)}
                           </p>
+                          <p className="muted-copy">{screeningLabel(row)}</p>
                         </div>
                         <span className="action-label action-label-trim">비중축소 검토</span>
                       </div>
                       <p className="analysis-opinion">{buildDecisionSummary(row)}</p>
-                      <ul className="analysis-bullet-list">
-                        {buildActionReasons(row).map((reason) => (
-                          <li key={reason}>{reason}</li>
-                        ))}
-                      </ul>
-                      <div className="analysis-meta-grid">
+                      <div className="analysis-verdict-row">
                         <div>
-                          <span>전망</span>
-                          <strong>{buildOutlook(row)}</strong>
+                          <span>판정</span>
+                          <strong>{buildAnalysisVerdict(row)}</strong>
                         </div>
                         <div>
-                          <span>밸류 / 해석</span>
-                          <strong>{buildValuationLens(row)}</strong>
+                          <span>체크포인트</span>
+                          <strong>{buildChecklist(row)}</strong>
+                        </div>
+                      </div>
+                      <div className="analysis-criteria-grid">
+                        {buildCriteriaRows(row).map((item) => (
+                          <article className={`analysis-criteria-card analysis-criteria-${item.tone}`} key={`${row.rowId}-${item.label}`}>
+                            <span>{item.label}</span>
+                            <strong>{item.value}</strong>
+                          </article>
+                        ))}
+                      </div>
+                      <div className="analysis-meta-grid">
+                        <div>
+                          <span>가장 약한 부분</span>
+                          <strong>{buildWeaknessLabel(row)}</strong>
+                        </div>
+                        <div>
+                          <span>스크리닝 사유</span>
+                          <strong>{screeningReason(row) || "국내 스크리닝 근거 미연동"}</strong>
                         </div>
                       </div>
                     </article>
@@ -871,7 +1311,7 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </div>
                 </div>
                 <div className="stack gap-4">
-                  {snapshot.buyCandidates.map((row) => (
+                  {buyCandidates.map((row) => (
                     <article className="analysis-security-card" key={row.rowId}>
                       <div className="position-card-top">
                         <div>
@@ -879,23 +1319,37 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                           <p className="muted-copy">
                             {row.theme} · {row.marketScope} · {formatGap(row.actualWeightPct, row.targetWeightPct)}
                           </p>
+                          <p className="muted-copy">{screeningLabel(row)}</p>
                         </div>
                         <span className="action-label action-label-buy">추가매수 검토</span>
                       </div>
                       <p className="analysis-opinion">{buildDecisionSummary(row)}</p>
-                      <ul className="analysis-bullet-list">
-                        {buildActionReasons(row).map((reason) => (
-                          <li key={reason}>{reason}</li>
-                        ))}
-                      </ul>
-                      <div className="analysis-meta-grid">
+                      <div className="analysis-verdict-row">
                         <div>
-                          <span>전망</span>
-                          <strong>{buildOutlook(row)}</strong>
+                          <span>판정</span>
+                          <strong>{buildAnalysisVerdict(row)}</strong>
                         </div>
                         <div>
-                          <span>밸류 / 해석</span>
-                          <strong>{buildValuationLens(row)}</strong>
+                          <span>체크포인트</span>
+                          <strong>{buildChecklist(row)}</strong>
+                        </div>
+                      </div>
+                      <div className="analysis-criteria-grid">
+                        {buildCriteriaRows(row).map((item) => (
+                          <article className={`analysis-criteria-card analysis-criteria-${item.tone}`} key={`${row.rowId}-${item.label}`}>
+                            <span>{item.label}</span>
+                            <strong>{item.value}</strong>
+                          </article>
+                        ))}
+                      </div>
+                      <div className="analysis-meta-grid">
+                        <div>
+                          <span>가장 약한 부분</span>
+                          <strong>{buildWeaknessLabel(row)}</strong>
+                        </div>
+                        <div>
+                          <span>스크리닝 사유</span>
+                          <strong>{screeningReason(row) || "국내 스크리닝 근거 미연동"}</strong>
                         </div>
                       </div>
                     </article>
@@ -1028,6 +1482,34 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                   </div>
                 </div>
 
+                <div className="screening-card screening-card-compact">
+                  <div className="screening-card-top">
+                    <strong>{screeningLabel(row)}</strong>
+                    <span>{row.screening?.stage || "-"}</span>
+                  </div>
+                  <div className="screening-score-grid">
+                    <div>
+                      <span>Final</span>
+                      <strong>{formatScreeningScore(row.screening?.finalScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Value</span>
+                      <strong>{formatScreeningScore(row.screening?.valueScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Valuation</span>
+                      <strong>{formatScreeningScore(row.screening?.valuationScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Trap Risk</span>
+                      <strong>{formatScreeningScore(row.screening?.valueTrapRiskScore)}</strong>
+                    </div>
+                  </div>
+                  <p className="screening-reason">
+                    {screeningReason(row) || "해외 종목 또는 미연동 종목이라 스크리닝 근거가 아직 없습니다."}
+                  </p>
+                </div>
+
                 <div className="position-detail-grid">
                   <div>
                     <span>전략</span>
@@ -1122,6 +1604,66 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                     <span>Fwd PER</span>
                     <strong>{formatMultiple(selectedRow.forwardPer)}</strong>
                   </div>
+                </div>
+                <div className="screening-card screening-card-detailed">
+                  <div className="section-head">
+                    <div>
+                      <p className="section-kicker">스크리닝</p>
+                      <h3>시스템 판정</h3>
+                    </div>
+                    <span className="badge">{screeningLabel(selectedRow)}</span>
+                  </div>
+                  <div className="screening-score-grid screening-score-grid-wide">
+                    <div>
+                      <span>Final Score</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.finalScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Value Score</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.valueScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Valuation Score</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.valuationScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Dividend Score</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.dividendPotentialScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Quality Score</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.businessQualityScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Trap Risk</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.valueTrapRiskScore)}</strong>
+                    </div>
+                  </div>
+                  <div className="screening-meta-grid">
+                    <div>
+                      <span>Stage</span>
+                      <strong>{selectedRow.screening?.stage || "-"}</strong>
+                    </div>
+                    <div>
+                      <span>Core Bucket</span>
+                      <strong>{selectedRow.screening?.coreBucket || "-"}</strong>
+                    </div>
+                    <div>
+                      <span>Leader Bucket</span>
+                      <strong>{selectedRow.screening?.leaderBucket || "-"}</strong>
+                    </div>
+                    <div>
+                      <span>6M Return</span>
+                      <strong>
+                        {selectedRow.screening?.returns6mPct !== null && selectedRow.screening?.returns6mPct !== undefined
+                          ? formatPct(selectedRow.screening.returns6mPct)
+                          : "-"}
+                      </strong>
+                    </div>
+                  </div>
+                  <p className="screening-reason">
+                    {screeningReason(selectedRow) || "해외 종목 또는 미연동 종목이라 스크리닝 시스템 의견이 아직 없습니다."}
+                  </p>
                 </div>
                 <div className="portfolio-classification-grid">
                   <div>
@@ -1226,6 +1768,9 @@ export function PortfolioDashboard({ initialRows }: PortfolioDashboardProps) {
                       <textarea className="portfolio-textarea" value={draft.notes} onChange={(event) => handleDraftChange("notes", event.target.value)} />
                     </label>
                     <div className="hero-actions">
+                      <button className="secondary-cta" type="button" onClick={handleEnrichValuation} disabled={isEnrichingValuation}>
+                        {isEnrichingValuation ? "밸류 채우는 중..." : "밸류 자동 채우기"}
+                      </button>
                       <button className="primary-small" type="button" onClick={handleApplyDraft}>
                         화면 반영
                       </button>

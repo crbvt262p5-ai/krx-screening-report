@@ -20,7 +20,7 @@ export async function getPortfolioPositions(): Promise<PortfolioPosition[]> {
   const { data, error } = await supabase
     .from("portfolio_positions")
     .select(
-      "row_id, ticker, name, market_scope, asset_class, country, theme, sub_theme, strategy, style_bucket, trend_view, cycle_view, conviction, fx_exposure, timing_view, actual_weight_pct, target_weight_pct, planned_action, notes, sort_order",
+      "row_id, ticker, name, market_scope, asset_class, country, theme, theme_category, sub_theme, strategy, style_bucket, trend_view, cycle_view, conviction, fx_exposure, timing_view, actual_weight_pct, target_weight_pct, per, pbr, eps, forward_per, planned_action, notes, sort_order",
     )
     .order("sort_order", { ascending: true });
 
