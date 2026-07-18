@@ -856,6 +856,51 @@ button {
   margin-top: 0.95rem;
 }
 
+.valuation-grid-prominent {
+  border-color: rgba(31, 111, 235, 0.16);
+  background: linear-gradient(180deg, rgba(244, 248, 255, 0.98), rgba(250, 252, 255, 0.98));
+}
+
+.valuation-grid-prominent strong {
+  color: #111827;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.position-valuation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(31, 111, 235, 0.12);
+  border-radius: 1rem;
+  background: rgba(241, 246, 255, 0.95);
+  padding: 0.9rem 1rem;
+}
+
+.position-valuation-banner span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.position-valuation-banner strong {
+  display: block;
+  margin-top: 0.18rem;
+  color: #111827;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.position-valuation-banner p {
+  max-width: 32rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
 .screening-card {
   border: 1px solid rgba(70, 92, 124, 0.1);
   border-radius: 0.95rem;
@@ -1193,6 +1238,16 @@ button {
   .position-detail-grid,
   .valuation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .position-valuation-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .position-valuation-banner p {
+    max-width: none;
+    text-align: left;
   }
 
   .screening-score-grid,

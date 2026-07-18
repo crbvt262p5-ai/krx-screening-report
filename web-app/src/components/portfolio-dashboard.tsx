@@ -61,6 +61,13 @@ function formatNumberValue(value: number | null) {
   return value.toLocaleString("ko-KR");
 }
 
+function formatMetricOrPending(value: number | null, formatter: (input: number | null) => string) {
+  if (value === null) {
+    return "연동 필요";
+  }
+  return formatter(value);
+}
+
 function formatScreeningScore(value: number | null | undefined) {
   if (value === null || value === undefined) {
     return "-";
@@ -838,6 +845,9 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const topThemeCategorySummary = formatThemeCategorySummary(topThemeCategories.map((item) => item.label));
   const domesticVsOverseas = `${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}`;
   const screeningConnectedCount = displayRows.filter((row) => row.screening !== null).length;
+  const valuationConnectedCount = displayRows.filter(
+    (row) => row.per !== null || row.pbr !== null || row.eps !== null || row.forwardPer !== null,
+  ).length;
   const buyCandidates = useMemo(
     () =>
       [...displayRows]
@@ -1428,6 +1438,16 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
             </select>
           </div>
 
+          <div className="position-valuation-banner mt-4">
+            <div>
+              <span>밸류 연동</span>
+              <strong>
+                {valuationConnectedCount} / {displayRows.length}
+              </strong>
+            </div>
+            <p>PER · PBR · EPS · Forward PER를 종목 카드 상단에서 바로 보이게 노출합니다.</p>
+          </div>
+
           <div className="position-card-grid mt-5">
             {filteredRows.map((row) => (
               <button
@@ -1474,22 +1494,22 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                   </div>
                 </div>
 
-                <div className="valuation-grid">
+                <div className="valuation-grid valuation-grid-prominent">
                   <div>
                     <span>PER</span>
-                    <strong>{formatMultiple(row.per)}</strong>
+                    <strong>{formatMetricOrPending(row.per, (value) => formatMultiple(value))}</strong>
                   </div>
                   <div>
                     <span>PBR</span>
-                    <strong>{formatMultiple(row.pbr)}</strong>
+                    <strong>{formatMetricOrPending(row.pbr, (value) => formatMultiple(value))}</strong>
                   </div>
                   <div>
                     <span>EPS</span>
-                    <strong>{formatNumberValue(row.eps)}</strong>
+                    <strong>{formatMetricOrPending(row.eps, formatNumberValue)}</strong>
                   </div>
                   <div>
                     <span>Fwd PER</span>
-                    <strong>{formatMultiple(row.forwardPer)}</strong>
+                    <strong>{formatMetricOrPending(row.forwardPer, (value) => formatMultiple(value))}</strong>
                   </div>
                 </div>
 
