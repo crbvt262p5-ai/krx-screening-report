@@ -12,6 +12,7 @@ import {
   matchScreeningRecord,
   type PortfolioScreeningRecord,
 } from "@/lib/portfolio-screening-shared";
+import type { ValuationEnrichmentItem } from "@/lib/portfolio-enrichment";
 
 type PortfolioDashboardProps = {
   initialRows: PortfolioPosition[];
@@ -521,6 +522,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   );
   const [isSavingFile, setIsSavingFile] = useState(false);
   const [isEnrichingValuation, setIsEnrichingValuation] = useState(false);
+  const [lastEnrichmentItems, setLastEnrichmentItems] = useState<ValuationEnrichmentItem[]>([]);
   const [statusMessage, setStatusMessage] = useState(
     usesCloudStorage
       ? "현재 포트를 불러왔어요. 수정 후 클라우드 저장하면 배포 환경에서도 그대로 유지됩니다."
@@ -713,10 +715,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
         | {
             ok?: boolean;
             rows?: PortfolioPosition[];
-            items?: Array<{
-              status: "updated" | "unchanged" | "skipped" | "unresolved";
-              name: string;
-            }>;
+            items?: ValuationEnrichmentItem[];
             summary?: {
               updatedCount: number;
               unchangedCount: number;
@@ -731,6 +730,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
         throw new Error(payload?.error ?? "밸류 자동 채우기 중 문제가 발생했습니다.");
       }
 
+      setLastEnrichmentItems(payload.items ?? []);
       setRows(payload.rows);
 
       const nextSelectedRow =
@@ -745,6 +745,20 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
           : null,
       );
 
+      let persistenceTail = "";
+      if (payload.summary.updatedCount > 0) {
+        setIsSavingFile(true);
+        try {
+          const persistence = await persistRows(payload.rows);
+          persistenceTail =
+            persistence === "supabase"
+              ? " 클라우드 저장까지 완료했습니다."
+              : " 로컬 파일 저장까지 완료했습니다.";
+        } finally {
+          setIsSavingFile(false);
+        }
+      }
+
       const unresolvedNames = (payload.items ?? [])
         .filter((item) => item.status === "unresolved")
         .slice(0, 3)
@@ -756,7 +770,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
           : "";
 
       setStatusMessage(
-        `밸류 자동 채우기 완료. 업데이트 ${payload.summary.updatedCount}개, 유지 ${payload.summary.unchangedCount}개, ETF 스킵 ${payload.summary.skippedCount}개, 미해결 ${payload.summary.unresolvedCount}개.${unresolvedTail}`,
+        `밸류 자동 채우기 완료. 업데이트 ${payload.summary.updatedCount}개, 유지 ${payload.summary.unchangedCount}개, ETF 스킵 ${payload.summary.skippedCount}개, 미해결 ${payload.summary.unresolvedCount}개.${unresolvedTail}${persistenceTail}`,
       );
     } catch (error) {
       setStatusMessage(
@@ -836,6 +850,30 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
     }
   }
 
+  async function persistRows(nextRows: PortfolioPosition[]) {
+    const response = await fetch("/api/portfolio/save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ rows: nextRows }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          ok?: boolean;
+          persistence?: "supabase" | "csv";
+          error?: string;
+        }
+      | null;
+
+    if (!response.ok) {
+      throw new Error(payload?.error ?? "저장 중 문제가 발생했습니다.");
+    }
+
+    return payload?.persistence ?? (usesCloudStorage ? "supabase" : "csv");
+  }
+
   const topThemes = snapshot.themeMix.slice(0, 4);
   const topActions = snapshot.actionMix.slice(0, 4);
   const topThemeSummary = topThemes
@@ -848,6 +886,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const valuationConnectedCount = displayRows.filter(
     (row) => row.per !== null || row.pbr !== null || row.eps !== null || row.forwardPer !== null,
   ).length;
+  const unresolvedEnrichmentItems = lastEnrichmentItems.filter((item) => item.status === "unresolved");
   const buyCandidates = useMemo(
     () =>
       [...displayRows]
@@ -937,6 +976,27 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
       <div className="inline-status-bar">
         <p className="inline-status">{statusMessage}</p>
       </div>
+
+      {unresolvedEnrichmentItems.length > 0 ? (
+        <section className="panel unresolved-panel">
+          <div className="section-head">
+            <div>
+              <p className="section-kicker">밸류 누락</p>
+              <h2>자동 연동이 안 된 종목</h2>
+            </div>
+            <span className="badge">{unresolvedEnrichmentItems.length}개</span>
+          </div>
+          <div className="unresolved-grid mt-5">
+            {unresolvedEnrichmentItems.slice(0, 6).map((item) => (
+              <article className="unresolved-card" key={item.rowId}>
+                <strong>{item.name}</strong>
+                <p>{item.reason || "자동 데이터 소스에서 유효한 밸류 값을 찾지 못했습니다."}</p>
+                <span>{item.source ? `조회 시도: ${item.source}` : "조회 심볼 미확정"}</span>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {workspaceTab === "overview" ? (
         <>
