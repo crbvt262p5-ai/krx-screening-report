@@ -65,9 +65,9 @@ button {
 .eyebrow,
 .section-kicker {
   color: var(--accent-strong);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
@@ -112,6 +112,28 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 0.9rem;
+}
+
+.section-head {
+  align-items: flex-start;
+}
+
+.section-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.section-head h2 {
+  color: #111827;
+  font-size: clamp(1.16rem, 1.6vw, 1.42rem);
+  font-weight: 800;
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  text-wrap: balance;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
 .hero-actions {
@@ -238,6 +260,19 @@ button {
   font-weight: 700;
 }
 
+.dog-name,
+.muted-copy,
+.priority-row strong,
+.priority-row p,
+.portfolio-stat-card strong,
+.portfolio-stat-card span,
+.mix-row strong,
+.mix-row p,
+.badge {
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -340,7 +375,15 @@ button {
 .priority-row p {
   margin-top: 0.18rem;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.priority-row strong {
+  display: block;
+  font-size: 0.95rem;
+  line-height: 1.34;
+  letter-spacing: -0.015em;
 }
 
 .portfolio-stat-card,
@@ -358,14 +401,17 @@ button {
 .portfolio-stat-card span {
   display: block;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .portfolio-stat-card strong {
   display: block;
-  margin-top: 0.45rem;
-  font-size: 1.08rem;
-  line-height: 1.35;
+  margin-top: 0.38rem;
+  font-size: 1rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
 .portfolio-mix-grid {
@@ -420,6 +466,11 @@ button {
   padding: 1rem;
 }
 
+.portfolio-mix-card .section-head h2,
+.portfolio-priority-card .section-head h2 {
+  font-size: 1.02rem;
+}
+
 .portfolio-holding-card-compact {
   padding: 0.8rem;
 }
@@ -450,15 +501,22 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
+  border-radius: 0.95rem;
+  padding: 0.72rem 0.8rem;
 }
 
 .mix-row strong {
   display: block;
+  font-size: 0.95rem;
+  line-height: 1.34;
+  letter-spacing: -0.015em;
 }
 
 .mix-row p {
   color: var(--muted);
-  font-size: 0.88rem;
+  margin-top: 0.16rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .mix-row-buy,

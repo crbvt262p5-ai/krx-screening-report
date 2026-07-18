@@ -68,6 +68,16 @@ function formatScreeningScore(value: number | null | undefined) {
   return value.toFixed(1);
 }
 
+function formatThemeCategorySummary(labels: string[]) {
+  if (labels.length === 0) {
+    return "미분류";
+  }
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  return `${labels[0]} 외 ${labels.length - 1}개`;
+}
+
 function withScreeningFallback(row: PortfolioPosition, screening: PortfolioScreeningRecord | null): PortfolioPosition {
   return {
     ...row,
@@ -825,6 +835,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
     .map((item) => `${item.label} ${formatPct(item.actualWeightPct)}`)
     .join(" · ");
   const topThemeCategories = snapshot.themeCategoryMix.slice(0, 3);
+  const topThemeCategorySummary = formatThemeCategorySummary(topThemeCategories.map((item) => item.label));
   const domesticVsOverseas = `${formatPct(snapshot.domesticWeight)} / ${formatPct(snapshot.overseasWeight)}`;
   const screeningConnectedCount = displayRows.filter((row) => row.screening !== null).length;
   const buyCandidates = useMemo(
@@ -944,7 +955,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                 </article>
                 <article className="portfolio-stat-card">
                   <span>상위 테마군</span>
-                  <strong>{topThemeCategories.map((item) => item.label).join(" · ") || "미분류"}</strong>
+                  <strong>{topThemeCategorySummary}</strong>
                 </article>
                 <article className="portfolio-stat-card">
                   <span>국가 수</span>
