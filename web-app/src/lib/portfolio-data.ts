@@ -3,6 +3,7 @@ import path from "node:path";
 import { isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
 import { enrichPortfolioRows } from "@/lib/portfolio-enrichment";
+import { withValuationOverride } from "@/lib/portfolio-valuation-overrides";
 import { getPortfolioPositions } from "@/lib/repositories/portfolio";
 import { portfolioSeedRecords } from "@/lib/portfolio-seed";
 
@@ -22,15 +23,17 @@ function needsValuationHydration(rows: PortfolioPosition[]) {
 }
 
 async function hydrateValuationRows(rows: PortfolioPosition[]) {
-  if (!needsValuationHydration(rows)) {
-    return rows;
+  const rowsWithOverrides = rows.map(withValuationOverride);
+
+  if (!needsValuationHydration(rowsWithOverrides)) {
+    return rowsWithOverrides;
   }
 
   try {
-    const result = await enrichPortfolioRows(rows);
-    return result.rows;
+    const result = await enrichPortfolioRows(rowsWithOverrides);
+    return result.rows.map(withValuationOverride);
   } catch {
-    return rows;
+    return rowsWithOverrides;
   }
 }
 

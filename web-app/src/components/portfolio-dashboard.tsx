@@ -12,6 +12,7 @@ import {
   matchScreeningRecord,
   type PortfolioScreeningRecord,
 } from "@/lib/portfolio-screening-shared";
+import { getValuationOverride } from "@/lib/portfolio-valuation-overrides";
 import type { ValuationEnrichmentItem } from "@/lib/portfolio-enrichment";
 
 type PortfolioDashboardProps = {
@@ -87,12 +88,13 @@ function formatThemeCategorySummary(labels: string[]) {
 }
 
 function withScreeningFallback(row: PortfolioPosition, screening: PortfolioScreeningRecord | null): PortfolioPosition {
+  const valuationOverride = getValuationOverride(row);
   return {
     ...row,
-    per: row.per ?? screening?.per ?? null,
-    pbr: row.pbr ?? screening?.pbr ?? null,
-    eps: row.eps ?? screening?.consensusEpsEstimate ?? null,
-    forwardPer: row.forwardPer ?? screening?.forwardPer ?? null,
+    per: row.per ?? screening?.per ?? valuationOverride?.per ?? null,
+    pbr: row.pbr ?? screening?.pbr ?? valuationOverride?.pbr ?? null,
+    eps: row.eps ?? screening?.consensusEpsEstimate ?? valuationOverride?.eps ?? null,
+    forwardPer: row.forwardPer ?? screening?.forwardPer ?? valuationOverride?.forwardPer ?? null,
   };
 }
 

@@ -27,12 +27,33 @@ function parseNullableNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function roundMetric(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.round(value * 100) / 100;
+}
+
 function mapScreeningRecord(record: RawRecord): PortfolioScreeningRecord {
   const prevClose = parseNullableNumber(record.prev_close);
+  const trailingPer = parseNullableNumber(record.per);
+  const forecastGrowthNextYearPct = parseNullableNumber(record.forecast_growth_next_year_pct);
+  const derivedTrailingEps =
+    prevClose !== null && trailingPer !== null && trailingPer !== 0 ? prevClose / trailingPer : null;
   const consensusEpsEstimate = parseNullableNumber(record.consensus_eps_estimate);
+  const derivedForwardEps =
+    derivedTrailingEps !== null &&
+    forecastGrowthNextYearPct !== null &&
+    forecastGrowthNextYearPct > -80 &&
+    forecastGrowthNextYearPct < 150
+      ? derivedTrailingEps * (1 + forecastGrowthNextYearPct / 100)
+      : null;
+  const resolvedEpsEstimate = roundMetric(consensusEpsEstimate ?? derivedTrailingEps);
   const forwardPer =
-    prevClose !== null && consensusEpsEstimate !== null && consensusEpsEstimate !== 0
-      ? Math.round((prevClose / consensusEpsEstimate) * 100) / 100
+    prevClose !== null &&
+    (consensusEpsEstimate ?? derivedForwardEps ?? derivedTrailingEps) !== null &&
+    (consensusEpsEstimate ?? derivedForwardEps ?? derivedTrailingEps) !== 0
+      ? Math.round((prevClose / (consensusEpsEstimate ?? derivedForwardEps ?? derivedTrailingEps)!) * 100) / 100
       : null;
 
   return {
@@ -41,11 +62,11 @@ function mapScreeningRecord(record: RawRecord): PortfolioScreeningRecord {
     market: toCellString(record.market),
     sector: toCellString(record.sector),
     sizeBucket: toCellString(record.size_bucket),
-    prevClose,
-    per: parseNullableNumber(record.per),
+    prevClose: roundMetric(prevClose),
+    per: trailingPer,
     pbr: parseNullableNumber(record.pbr),
-    consensusEpsEstimate,
-    forwardPer,
+    consensusEpsEstimate: resolvedEpsEstimate,
+    forwardPer: roundMetric(forwardPer),
     dividendYieldTrailing: parseNullableNumber(record.dividend_yield_trailing),
     returns6mPct: parseNullableNumber(record.returns_6m_pct),
     finalScore: parseNullableNumber(record.final_score),
