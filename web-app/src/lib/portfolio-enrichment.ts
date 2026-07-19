@@ -36,6 +36,16 @@ export type ValuationEnrichmentResponse = {
 
 const YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
 
+const OVERSEAS_TICKER_ALIASES: Record<string, string[]> = {
+  "스미토모": ["8053.T"],
+  "스미토모상사": ["8053.T"],
+  "sumitomo": ["8053.T"],
+  "sumitomo corporation": ["8053.T"],
+  "도쿄카이죠홀딩스": ["8766.T"],
+  "도쿄해상홀딩스": ["8766.T"],
+  "tokio marine holdings": ["8766.T"],
+};
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -47,22 +57,30 @@ function roundMetric(value: number | null) {
   return Math.round(value * 100) / 100;
 }
 
+function normalizeAliasKey(value: string) {
+  return value.trim().toLowerCase().replaceAll(/\s+/g, " ");
+}
+
 function buildYahooCandidates(row: PortfolioPosition) {
   const ticker = row.ticker.trim().toUpperCase();
+  const aliasCandidates = [
+    ...(OVERSEAS_TICKER_ALIASES[normalizeAliasKey(row.ticker)] ?? []),
+    ...(OVERSEAS_TICKER_ALIASES[normalizeAliasKey(row.name)] ?? []),
+  ];
 
   if (!ticker) {
-    return [];
+    return [...new Set(aliasCandidates)];
   }
 
   if (/^\d{6}$/.test(ticker)) {
-    return [`${ticker}.KS`, `${ticker}.KQ`];
+    return [...new Set([`${ticker}.KS`, `${ticker}.KQ`, ...aliasCandidates])];
   }
 
   if (/^[A-Z][A-Z0-9.\-=]{0,14}$/.test(ticker)) {
-    return [ticker];
+    return [...new Set([ticker, ...aliasCandidates])];
   }
 
-  return [];
+  return [...new Set(aliasCandidates)];
 }
 
 function metricCount(quote: YahooQuote | undefined) {
