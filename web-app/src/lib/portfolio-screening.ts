@@ -28,14 +28,24 @@ function parseNullableNumber(value: unknown) {
 }
 
 function mapScreeningRecord(record: RawRecord): PortfolioScreeningRecord {
+  const prevClose = parseNullableNumber(record.prev_close);
+  const consensusEpsEstimate = parseNullableNumber(record.consensus_eps_estimate);
+  const forwardPer =
+    prevClose !== null && consensusEpsEstimate !== null && consensusEpsEstimate !== 0
+      ? Math.round((prevClose / consensusEpsEstimate) * 100) / 100
+      : null;
+
   return {
     ticker: toCellString(record.ticker),
     name: toCellString(record.name),
     market: toCellString(record.market),
     sector: toCellString(record.sector),
     sizeBucket: toCellString(record.size_bucket),
+    prevClose,
     per: parseNullableNumber(record.per),
     pbr: parseNullableNumber(record.pbr),
+    consensusEpsEstimate,
+    forwardPer,
     dividendYieldTrailing: parseNullableNumber(record.dividend_yield_trailing),
     returns6mPct: parseNullableNumber(record.returns_6m_pct),
     finalScore: parseNullableNumber(record.final_score),

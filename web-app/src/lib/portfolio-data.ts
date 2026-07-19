@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isVercelRuntime } from "@/lib/env";
 import { normalizePortfolioRecords, type PortfolioPosition } from "@/lib/portfolio-dashboard";
+import { enrichPortfolioRows } from "@/lib/portfolio-enrichment";
 import { getPortfolioPositions } from "@/lib/repositories/portfolio";
 import { portfolioSeedRecords } from "@/lib/portfolio-seed";
 
@@ -12,14 +13,35 @@ function resolvePortfolioPaths() {
   ];
 }
 
+function needsValuationHydration(rows: PortfolioPosition[]) {
+  return rows.some(
+    (row) =>
+      row.assetClass !== "ETF" &&
+      (row.per === null || row.pbr === null || row.eps === null || row.forwardPer === null),
+  );
+}
+
+async function hydrateValuationRows(rows: PortfolioPosition[]) {
+  if (!needsValuationHydration(rows)) {
+    return rows;
+  }
+
+  try {
+    const result = await enrichPortfolioRows(rows);
+    return result.rows;
+  } catch {
+    return rows;
+  }
+}
+
 export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
   const portfolioRows = await getPortfolioPositions();
   if (portfolioRows.length > 0) {
-    return portfolioRows;
+    return hydrateValuationRows(portfolioRows);
   }
 
   if (isVercelRuntime()) {
-    return normalizePortfolioRecords([...portfolioSeedRecords]);
+    return hydrateValuationRows(normalizePortfolioRecords([...portfolioSeedRecords]));
   }
 
   for (const filePath of resolvePortfolioPaths()) {
@@ -34,11 +56,11 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
         raw: false,
       });
 
-      return normalizePortfolioRecords(records);
+      return hydrateValuationRows(normalizePortfolioRecords(records));
     } catch {
       continue;
     }
   }
 
-  return normalizePortfolioRecords([...portfolioSeedRecords]);
+  return hydrateValuationRows(normalizePortfolioRecords([...portfolioSeedRecords]));
 }

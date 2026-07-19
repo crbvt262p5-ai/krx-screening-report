@@ -91,6 +91,8 @@ function withScreeningFallback(row: PortfolioPosition, screening: PortfolioScree
     ...row,
     per: row.per ?? screening?.per ?? null,
     pbr: row.pbr ?? screening?.pbr ?? null,
+    eps: row.eps ?? screening?.consensusEpsEstimate ?? null,
+    forwardPer: row.forwardPer ?? screening?.forwardPer ?? null,
   };
 }
 

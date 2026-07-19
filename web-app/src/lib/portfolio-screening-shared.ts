@@ -6,8 +6,11 @@ export type PortfolioScreeningRecord = {
   market: string;
   sector: string;
   sizeBucket: string;
+  prevClose: number | null;
   per: number | null;
   pbr: number | null;
+  consensusEpsEstimate: number | null;
+  forwardPer: number | null;
   dividendYieldTrailing: number | null;
   returns6mPct: number | null;
   finalScore: number | null;
