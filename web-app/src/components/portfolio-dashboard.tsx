@@ -458,6 +458,26 @@ function buildChecklist(row: AdvisoryPortfolioPosition) {
   return "근거 보강 후 유지 판단";
 }
 
+function buildActionReasonTags(row: AdvisoryPortfolioPosition) {
+  const tags: string[] = [];
+  const underweight = row.targetWeightPct - row.actualWeightPct;
+  const overweight = row.actualWeightPct - row.targetWeightPct;
+
+  if (hasIdentityUncertainty(row)) tags.push("심볼 확인");
+  if (row.per !== null && row.per <= 10) tags.push("저PER");
+  if (row.pbr !== null && row.pbr <= 1) tags.push("저PBR");
+  if (row.forwardPer !== null && row.per !== null && row.forwardPer < row.per * 0.9) tags.push("이익 개선");
+  if ((row.screening?.dividendYieldTrailing ?? 0) >= 4 || row.styleBucket === "인컴") tags.push("배당 방어");
+  if (underweight > 0.4) tags.push("목표 미달");
+  if (overweight > 0.4) tags.push("목표 초과");
+  if (row.trendView.includes("과열") || row.cycleView.includes("과열") || row.screening?.stage === "과열") tags.push("과열 관리");
+  if (row.screening?.recommendationBucket === "가치함정 경고") tags.push("함정 주의");
+  if (row.screening?.recommendationBucket === "제외") tags.push("확대 비추천");
+  if (row.trendView.includes("확인 필요")) tags.push("추세 확인");
+
+  return [...new Set(tags)].slice(0, 3);
+}
+
 function buildPortfolioNarrative(
   rows: ScreenedPortfolioPosition[],
   snapshot: ReturnType<typeof buildPortfolioSnapshot>,
@@ -912,6 +932,28 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
         .slice(0, 5),
     [displayRows],
   );
+  const reviewCandidates = useMemo(
+    () =>
+      [...displayRows]
+        .filter((row) => hasIdentityUncertainty(row) || row.trendView.includes("확인 필요"))
+        .sort((left, right) => Math.abs(right.actualWeightPct - right.targetWeightPct) - Math.abs(left.actualWeightPct - left.targetWeightPct))
+        .slice(0, 4),
+    [displayRows],
+  );
+  const watchCandidates = useMemo(
+    () =>
+      [...displayRows]
+        .filter(
+          (row) =>
+            row.plannedAction.includes("관찰") ||
+            (!buyCandidates.some((item) => item.rowId === row.rowId) &&
+              !trimCandidates.some((item) => item.rowId === row.rowId) &&
+              !reviewCandidates.some((item) => item.rowId === row.rowId) &&
+              (row.screening?.recommendationBucket === "소액 관찰" || row.styleBucket === "인컴")),
+        )
+        .slice(0, 4),
+    [buyCandidates, displayRows, reviewCandidates, trimCandidates],
+  );
   const analysisThemeMix = snapshot.themeMix.slice(0, 5);
   const analysisRegionMix = snapshot.regionMix.slice(0, 3);
   const themeChartStyle = buildDonutStyle(analysisThemeMix, ["#1f6feb", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444"]);
@@ -1181,17 +1223,18 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
           <section className="panel">
             <div className="section-head">
               <div>
-                <p className="section-kicker">리밸런싱</p>
-                <h2>우선 확인 종목</h2>
+                <p className="section-kicker">오늘 액션</p>
+                <h2>지금 봐야 할 종목</h2>
               </div>
+              <span className="badge">행동 우선</span>
             </div>
 
-            <div className="portfolio-priority-grid mt-5">
+            <div className="action-hq-grid mt-5">
               <section className="portfolio-priority-card">
                 <div className="section-head">
                   <div>
                     <p className="section-kicker">매수</p>
-                    <h2>추가매수 우선순위</h2>
+                    <h2>추가매수</h2>
                   </div>
                 </div>
                 <div className="stack gap-2">
@@ -1204,8 +1247,13 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                     >
                       <div>
                         <strong>{row.name}</strong>
-                          <p>{buildDecisionSummary(row)}</p>
-                          <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p>{buildDecisionSummary(row)}</p>
+                        <p className="muted-copy">{screeningLabel(row)}</p>
+                        <div className="priority-tag-row">
+                          {buildActionReasonTags(row).map((tag) => (
+                            <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
+                          ))}
+                        </div>
                       </div>
                       <span className="gap-pill gap-pill-buy">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
                     </button>
@@ -1217,7 +1265,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                 <div className="section-head">
                   <div>
                     <p className="section-kicker">축소</p>
-                    <h2>비중축소 우선순위</h2>
+                    <h2>비중축소</h2>
                   </div>
                 </div>
                 <div className="stack gap-2">
@@ -1230,10 +1278,67 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                     >
                       <div>
                         <strong>{row.name}</strong>
-                          <p>{buildDecisionSummary(row)}</p>
-                          <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p>{buildDecisionSummary(row)}</p>
+                        <p className="muted-copy">{screeningLabel(row)}</p>
+                        <div className="priority-tag-row">
+                          {buildActionReasonTags(row).map((tag) => (
+                            <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
+                          ))}
+                        </div>
                       </div>
                       <span className="gap-pill gap-pill-trim">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="portfolio-priority-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">관찰</p>
+                    <h2>유지·관찰</h2>
+                  </div>
+                </div>
+                <div className="stack gap-2">
+                  {watchCandidates.map((row) => (
+                    <button key={row.rowId} className="priority-row" type="button" onClick={() => selectRow(row)}>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <p>{buildDecisionSummary(row)}</p>
+                        <p className="muted-copy">{screeningLabel(row)}</p>
+                        <div className="priority-tag-row">
+                          {buildActionReasonTags(row).map((tag) => (
+                            <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="gap-pill">{formatGap(row.actualWeightPct, row.targetWeightPct)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="portfolio-priority-card">
+                <div className="section-head">
+                  <div>
+                    <p className="section-kicker">확인</p>
+                    <h2>먼저 확인 필요</h2>
+                  </div>
+                </div>
+                <div className="stack gap-2">
+                  {reviewCandidates.map((row) => (
+                    <button key={row.rowId} className="priority-row priority-row-review" type="button" onClick={() => selectRow(row)}>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <p>{buildDecisionSummary(row)}</p>
+                        <p className="muted-copy">{screeningLabel(row)}</p>
+                        <div className="priority-tag-row">
+                          {buildActionReasonTags(row).map((tag) => (
+                            <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="gap-pill gap-pill-review">확인</span>
                     </button>
                   ))}
                 </div>

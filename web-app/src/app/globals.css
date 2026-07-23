@@ -346,9 +346,17 @@ button {
   flex-direction: column;
 }
 
-.portfolio-priority-grid {
+.portfolio-priority-grid,
+.action-hq-grid {
   display: grid;
   gap: 1rem;
+}
+
+.portfolio-priority-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-hq-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -372,11 +380,35 @@ button {
   text-align: left;
 }
 
+.priority-row-review {
+  border-color: rgba(245, 158, 11, 0.18);
+  background: rgba(255, 249, 237, 0.98);
+}
+
 .priority-row p {
   margin-top: 0.18rem;
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.42;
+}
+
+.priority-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.priority-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  background: rgba(238, 245, 255, 0.95);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .priority-row strong {
@@ -546,6 +578,11 @@ button {
 .action-label-trim {
   background: rgba(253, 226, 226, 0.95);
   color: #b91c1c;
+}
+
+.gap-pill-review {
+  background: rgba(254, 243, 199, 0.98);
+  color: #92400e;
 }
 
 .action-badge-watch,
@@ -1229,7 +1266,8 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .portfolio-priority-grid {
+  .portfolio-priority-grid,
+  .action-hq-grid {
     grid-template-columns: 1fr;
   }
 
