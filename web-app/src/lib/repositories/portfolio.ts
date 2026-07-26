@@ -42,6 +42,17 @@ export async function upsertPortfolioPositions(rows: PortfolioPosition[]) {
   }
 
   const payload = rows.map((row, index) => toPortfolioPositionRow(row, index));
+  const rowIds = payload.map((row) => row.row_id);
+
+  const { error: deleteError } = await supabase
+    .from("portfolio_positions")
+    .delete()
+    .not("row_id", "in", `(${rowIds.map((rowId) => `"${rowId}"`).join(",")})`);
+
+  if (deleteError) {
+    throw new Error("기존 포트폴리오 정리에 실패했습니다.");
+  }
+
   const { error } = await supabase
     .from("portfolio_positions")
     .upsert(payload, { onConflict: "row_id" });

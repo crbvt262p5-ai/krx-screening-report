@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
   buildPortfolioSnapshot,
@@ -14,6 +14,7 @@ import {
 } from "@/lib/portfolio-screening-shared";
 import { getValuationOverride } from "@/lib/portfolio-valuation-overrides";
 import type { ValuationEnrichmentItem } from "@/lib/portfolio-enrichment";
+import type { PortfolioMarketSnapshot } from "@/lib/portfolio-live-market";
 
 type PortfolioDashboardProps = {
   initialRows: PortfolioPosition[];
@@ -27,6 +28,8 @@ type ScreenedPortfolioPosition = PortfolioPosition & {
 type AdvisoryPortfolioPosition = PortfolioPosition & {
   screening?: PortfolioScreeningRecord | null;
 };
+type MarketSnapshotMap = Record<string, PortfolioMarketSnapshot>;
+type TradeMode = "buy" | "sell";
 
 const INVESTOR_PROFILE = {
   title: "밸류 우선 운영",
@@ -75,6 +78,28 @@ function formatScreeningScore(value: number | null | undefined) {
     return "-";
   }
   return value.toFixed(1);
+}
+
+function formatSignedPct(value: number | null) {
+  if (value === null) {
+    return "-";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatCurrency(value: number | null, suffix = "원") {
+  if (value === null) {
+    return "-";
+  }
+  return `${Math.round(value).toLocaleString("ko-KR")}${suffix}`;
+}
+
+function formatSignedCurrency(value: number | null, suffix = "원") {
+  if (value === null) {
+    return "-";
+  }
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? "+" : ""}${rounded.toLocaleString("ko-KR")}${suffix}`;
 }
 
 function formatThemeCategorySummary(labels: string[]) {
@@ -530,6 +555,69 @@ function buildDonutStyle(items: Array<{ actualWeightPct: number }>, colors: stri
   return { background: `conic-gradient(${stops.join(", ")})` };
 }
 
+function getRowMarketTimeZone(row: AdvisoryPortfolioPosition) {
+  if (row.marketScope === "국내" || row.country === "한국") {
+    return "Asia/Seoul";
+  }
+  if (row.country === "일본" || row.ticker.endsWith(".T")) {
+    return "Asia/Tokyo";
+  }
+  return "America/New_York";
+}
+
+function getMinutesInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    weekday: "short",
+  }).formatToParts(date);
+
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "Mon";
+
+  return {
+    minutes: hour * 60 + minute,
+    weekday,
+  };
+}
+
+function buildMarketPhaseLabel(row: AdvisoryPortfolioPosition, date: Date) {
+  const timeZone = getRowMarketTimeZone(row);
+  const { minutes, weekday } = getMinutesInTimeZone(date, timeZone);
+  const isWeekend = weekday === "Sat" || weekday === "Sun";
+
+  if (isWeekend) {
+    if (timeZone === "America/New_York") return "미국 휴장";
+    if (timeZone === "Asia/Tokyo") return "일본 휴장";
+    return "국내 휴장";
+  }
+
+  if (timeZone === "Asia/Seoul") {
+    if (minutes < 9 * 60) return "국내 개장 전";
+    if (minutes < 15 * 60 + 30) return "국내 장중";
+    return "국내 장마감";
+  }
+
+  if (timeZone === "Asia/Tokyo") {
+    if (minutes < 9 * 60) return "일본 개장 전";
+    if (minutes < 15 * 60) return "일본 장중";
+    return "일본 장마감";
+  }
+
+  if (minutes < 4 * 60) return "미국 장마감";
+  if (minutes < 9 * 60 + 30) return "미국 프리마켓";
+  if (minutes < 16 * 60) return "미국 장중";
+  if (minutes < 20 * 60) return "미국 애프터마켓";
+  return "미국 장마감";
+}
+
+function sortPnlEntries(entries: Array<{ label: string; value: number }>) {
+  return [...entries].sort((left, right) => right.value - left.value);
+}
+
 export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioDashboardProps) {
   const usesCloudStorage = hasSupabaseEnv();
   const [rows, setRows] = useState(initialRows);
@@ -547,6 +635,11 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const [isSavingFile, setIsSavingFile] = useState(false);
   const [isEnrichingValuation, setIsEnrichingValuation] = useState(false);
   const [lastEnrichmentItems, setLastEnrichmentItems] = useState<ValuationEnrichmentItem[]>([]);
+  const [marketSnapshots, setMarketSnapshots] = useState<MarketSnapshotMap>({});
+  const [marketFetchedAt, setMarketFetchedAt] = useState<string | null>(null);
+  const [tradeMode, setTradeMode] = useState<TradeMode>("buy");
+  const [tradeWeightDelta, setTradeWeightDelta] = useState("0.00");
+  const [tradeMemo, setTradeMemo] = useState("");
   const [statusMessage, setStatusMessage] = useState(
     usesCloudStorage
       ? "현재 포트를 불러왔어요. 수정 후 클라우드 저장하면 배포 환경에서도 그대로 유지됩니다."
@@ -721,6 +814,72 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
 
   function handleDraftChange<K extends keyof PortfolioPosition>(key: K, value: PortfolioPosition[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function buildTradeMemoLine(mode: TradeMode, delta: number, memo: string) {
+    const stamp = new Date().toLocaleDateString("ko-KR");
+    const actionLabel = mode === "buy" ? "매수" : "매도";
+    const deltaLabel = `${mode === "buy" ? "+" : "-"}${delta.toFixed(2)}%p`;
+    const memoTail = memo.trim() ? ` · ${memo.trim()}` : "";
+    return `[${stamp}] ${actionLabel} 반영 ${deltaLabel}${memoTail}`;
+  }
+
+  function updateDraftForTrade(mode: TradeMode, delta: number, memo: string) {
+    if (!draft) {
+      return;
+    }
+
+    const signedDelta = mode === "buy" ? delta : -delta;
+    const nextActualWeightPct = Math.max(0, Number((draft.actualWeightPct + signedDelta).toFixed(2)));
+    const nextNotes = [draft.notes?.trim(), buildTradeMemoLine(mode, delta, memo)].filter(Boolean).join("\n");
+    const nextPlannedAction =
+      nextActualWeightPct === 0
+        ? "정리 검토"
+        : nextActualWeightPct < draft.targetWeightPct
+          ? "추가매수 검토"
+          : nextActualWeightPct > draft.targetWeightPct
+            ? "비중축소 검토"
+            : "보유/관찰";
+
+    setDraft({
+      ...draft,
+      actualWeightPct: nextActualWeightPct,
+      plannedAction: nextPlannedAction,
+      notes: nextNotes,
+    });
+
+    setTradeWeightDelta("0.00");
+    setTradeMemo("");
+    setStatusMessage(`${draft.name} 오늘 매매 내용을 드래프트에 반영했습니다. 저장하면 포트에 확정됩니다.`);
+  }
+
+  function handleApplyTradeAdjustment() {
+    const delta = Number(tradeWeightDelta);
+    if (!draft || !Number.isFinite(delta) || delta <= 0) {
+      setStatusMessage("오늘 매매 반영 값이 비어 있어요. 비중 변화를 0보다 크게 입력해 주세요.");
+      return;
+    }
+
+    updateDraftForTrade(tradeMode, delta, tradeMemo);
+  }
+
+  function handleMarkFullySold() {
+    if (!draft) {
+      return;
+    }
+
+    const stamp = new Date().toLocaleDateString("ko-KR");
+    const nextNotes = [draft.notes?.trim(), `[${stamp}] 전량 매도 반영`].filter(Boolean).join("\n");
+
+    setDraft({
+      ...draft,
+      actualWeightPct: 0,
+      plannedAction: "정리 검토",
+      notes: nextNotes,
+    });
+    setTradeWeightDelta("0.00");
+    setTradeMemo("");
+    setStatusMessage(`${draft.name} 전량 매도 내용을 드래프트에 반영했습니다. 저장하면 포트에 확정됩니다.`);
   }
 
   async function handleEnrichValuation() {
@@ -959,6 +1118,127 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const themeChartStyle = buildDonutStyle(analysisThemeMix, ["#1f6feb", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444"]);
   const regionChartStyle = buildDonutStyle(analysisRegionMix, ["#174ea6", "#06b6d4", "#94a3b8"]);
   const portfolioNarrative = buildPortfolioNarrative(displayRows, snapshot, buyCandidates, trimCandidates);
+  const marketClock = marketFetchedAt ? new Date(marketFetchedAt) : new Date();
+  const portfolioDayPnlKrw = Object.values(marketSnapshots).reduce(
+    (sum, item) => sum + (item.estimatedDayPnlKrw ?? 0),
+    0,
+  );
+  const marketCoverageCount = Object.values(marketSnapshots).filter((item) => item.currentPrice !== null).length;
+  const dayPnlRegionMix = useMemo(() => {
+    const totals = new Map<string, number>();
+
+    for (const row of displayRows) {
+      const pnl = marketSnapshots[row.rowId]?.estimatedDayPnlKrw ?? null;
+      if (pnl === null) {
+        continue;
+      }
+      totals.set(row.marketScope, (totals.get(row.marketScope) ?? 0) + pnl);
+    }
+
+    return sortPnlEntries(
+      [...totals.entries()].map(([label, value]) => ({ label, value: Math.round(value) })),
+    );
+  }, [displayRows, marketSnapshots]);
+  const dayPnlThemeMix = useMemo(() => {
+    const totals = new Map<string, number>();
+
+    for (const row of displayRows) {
+      const pnl = marketSnapshots[row.rowId]?.estimatedDayPnlKrw ?? null;
+      if (pnl === null) {
+        continue;
+      }
+      totals.set(row.theme, (totals.get(row.theme) ?? 0) + pnl);
+    }
+
+    return sortPnlEntries(
+      [...totals.entries()].map(([label, value]) => ({ label, value: Math.round(value) })),
+    );
+  }, [displayRows, marketSnapshots]);
+  const bestThemePnl = dayPnlThemeMix[0] ?? null;
+  const weakestThemePnl = [...dayPnlThemeMix].reverse().find((item) => item.value < 0) ?? null;
+  const domesticDayPnl = dayPnlRegionMix.find((item) => item.label === "국내")?.value ?? null;
+  const overseasDayPnl = dayPnlRegionMix.find((item) => item.label === "해외")?.value ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMarketSnapshots() {
+      try {
+        const response = await fetch("/api/portfolio/market-snapshot", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ rows }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              snapshots?: PortfolioMarketSnapshot[];
+              fetchedAt?: string;
+            }
+          | null;
+
+        if (!response.ok || !payload?.ok || !payload.snapshots) {
+          return;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setMarketSnapshots(
+          Object.fromEntries(payload.snapshots.map((item) => [item.rowId, item])),
+        );
+        setMarketFetchedAt(payload.fetchedAt ?? new Date().toISOString());
+      } catch {
+        if (!cancelled) {
+          setMarketFetchedAt(new Date().toISOString());
+        }
+      }
+    }
+
+    void loadMarketSnapshots();
+    const timer = window.setInterval(() => {
+      void loadMarketSnapshots();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [rows]);
+
+  function getMarketSnapshot(rowId: string) {
+    return marketSnapshots[rowId] ?? null;
+  }
+
+  function buildMarketLine(row: AdvisoryPortfolioPosition) {
+    const snapshot = getMarketSnapshot(row.rowId);
+    const phaseLabel = buildMarketPhaseLabel(row, marketClock);
+
+    if (!snapshot || snapshot.currentPrice === null) {
+      return `${phaseLabel} · 실시간 시세 대기 중`;
+    }
+
+    const priceText =
+      snapshot.currency === "KRW" || !snapshot.currency
+        ? formatCurrency(snapshot.currentPrice)
+        : `${snapshot.currentPrice.toLocaleString("en-US")} ${snapshot.currency}`.trim();
+    const fxText =
+      snapshot.currency && snapshot.currency !== "KRW"
+        ? snapshot.fxRateToKrw !== null
+          ? `환율 ${formatCurrency(snapshot.fxRateToKrw)}`
+          : "환율 대기"
+        : "원화 자산";
+    const pnlText =
+      snapshot.estimatedDayPnlKrw !== null
+        ? `추정 일간 ${formatSignedCurrency(snapshot.estimatedDayPnlKrw)}`
+        : "일간 손익 계산 대기";
+
+    return `${phaseLabel} · ${priceText} · ${formatSignedPct(snapshot.changePct)} · ${fxText} · ${pnlText}`;
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -1021,6 +1301,11 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
 
       <div className="inline-status-bar">
         <p className="inline-status">{statusMessage}</p>
+        {marketFetchedAt ? (
+          <p className="inline-status market-status">
+            시세 갱신 {new Date(marketFetchedAt).toLocaleTimeString("ko-KR")}
+          </p>
+        ) : null}
       </div>
 
       {unresolvedEnrichmentItems.length > 0 ? (
@@ -1092,6 +1377,10 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                   <strong>{formatPct(snapshot.topFiveWeight)}</strong>
                 </article>
                 <article className="portfolio-stat-card">
+                  <span>오늘 포트 손익</span>
+                  <strong>{marketCoverageCount > 0 ? formatSignedCurrency(portfolioDayPnlKrw) : "집계 대기"}</strong>
+                </article>
+                <article className="portfolio-stat-card">
                   <span>추가 매수 여력</span>
                   <strong>{snapshot.cashDrag > 0 ? formatPct(snapshot.cashDrag) : "0.00%"}</strong>
                 </article>
@@ -1104,6 +1393,33 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                         0,
                       ),
                     )}
+                  </strong>
+                </article>
+              </div>
+
+              <div className="day-pnl-grid mt-4">
+                <article className="day-pnl-card">
+                  <span>국내 오늘 손익</span>
+                  <strong className={domesticDayPnl !== null && domesticDayPnl < 0 ? "loss-text" : "gain-text"}>
+                    {domesticDayPnl !== null ? formatSignedCurrency(domesticDayPnl) : "집계 대기"}
+                  </strong>
+                </article>
+                <article className="day-pnl-card">
+                  <span>해외 오늘 손익</span>
+                  <strong className={overseasDayPnl !== null && overseasDayPnl < 0 ? "loss-text" : "gain-text"}>
+                    {overseasDayPnl !== null ? formatSignedCurrency(overseasDayPnl) : "집계 대기"}
+                  </strong>
+                </article>
+                <article className="day-pnl-card day-pnl-card-wide">
+                  <span>상위 기여 테마</span>
+                  <strong className={bestThemePnl !== null && bestThemePnl.value < 0 ? "loss-text" : "gain-text"}>
+                    {bestThemePnl ? `${bestThemePnl.label} ${formatSignedCurrency(bestThemePnl.value)}` : "집계 대기"}
+                  </strong>
+                </article>
+                <article className="day-pnl-card day-pnl-card-wide">
+                  <span>약한 테마</span>
+                  <strong className={weakestThemePnl !== null ? "loss-text" : ""}>
+                    {weakestThemePnl ? `${weakestThemePnl.label} ${formatSignedCurrency(weakestThemePnl.value)}` : "없음"}
                   </strong>
                 </article>
               </div>
@@ -1249,6 +1565,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                         <strong>{row.name}</strong>
                         <p>{buildDecisionSummary(row)}</p>
                         <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p className="priority-market-line">{buildMarketLine(row)}</p>
                         <div className="priority-tag-row">
                           {buildActionReasonTags(row).map((tag) => (
                             <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
@@ -1280,6 +1597,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                         <strong>{row.name}</strong>
                         <p>{buildDecisionSummary(row)}</p>
                         <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p className="priority-market-line">{buildMarketLine(row)}</p>
                         <div className="priority-tag-row">
                           {buildActionReasonTags(row).map((tag) => (
                             <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
@@ -1306,6 +1624,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                         <strong>{row.name}</strong>
                         <p>{buildDecisionSummary(row)}</p>
                         <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p className="priority-market-line">{buildMarketLine(row)}</p>
                         <div className="priority-tag-row">
                           {buildActionReasonTags(row).map((tag) => (
                             <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
@@ -1332,6 +1651,7 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                         <strong>{row.name}</strong>
                         <p>{buildDecisionSummary(row)}</p>
                         <p className="muted-copy">{screeningLabel(row)}</p>
+                        <p className="priority-market-line">{buildMarketLine(row)}</p>
                         <div className="priority-tag-row">
                           {buildActionReasonTags(row).map((tag) => (
                             <span className="priority-tag" key={`${row.rowId}-${tag}`}>{tag}</span>
@@ -1663,6 +1983,10 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                   </div>
                 </div>
 
+                <div className="position-live-strip">
+                  <strong>{buildMarketLine(row)}</strong>
+                </div>
+
                 <div className="valuation-grid valuation-grid-prominent">
                   <div>
                     <span>PER</span>
@@ -1893,6 +2217,54 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                 <h3>수정</h3>
                 {draft ? (
                   <div className="portfolio-edit-grid">
+                    <div className="trade-helper-card portfolio-field-wide">
+                      <div className="section-head">
+                        <div>
+                          <p className="section-kicker">오늘 매매 반영</p>
+                          <h2>퀵 반영</h2>
+                        </div>
+                      </div>
+                      <div className="trade-helper-grid">
+                        <label className="portfolio-field">
+                          <span>매매 방향</span>
+                          <select className="portfolio-input" value={tradeMode} onChange={(event) => setTradeMode(event.target.value as TradeMode)}>
+                            <option value="buy">매수</option>
+                            <option value="sell">매도</option>
+                          </select>
+                        </label>
+                        <label className="portfolio-field">
+                          <span>실제 비중 변화</span>
+                          <input
+                            className="portfolio-input"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={tradeWeightDelta}
+                            onChange={(event) => setTradeWeightDelta(event.target.value)}
+                          />
+                        </label>
+                        <label className="portfolio-field portfolio-field-wide">
+                          <span>오늘 매매 메모</span>
+                          <input
+                            className="portfolio-input"
+                            placeholder="예: 장중 2차 매수, 실적 확인 후 축소"
+                            value={tradeMemo}
+                            onChange={(event) => setTradeMemo(event.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <div className="trade-helper-actions">
+                        <button className="primary-small" type="button" onClick={handleApplyTradeAdjustment}>
+                          오늘 매매 반영
+                        </button>
+                        <button className="secondary-cta" type="button" onClick={handleMarkFullySold}>
+                          전량 매도 반영
+                        </button>
+                        <p className="trade-helper-copy">
+                          종목 앱에서 사고팔고 난 뒤 여기서 비중 변화만 넣으면 드래프트에 바로 반영됩니다.
+                        </p>
+                      </div>
+                    </div>
                     <label className="portfolio-field">
                       <span>테마군</span>
                       <input className="portfolio-input" value={draft.themeCategory} onChange={(event) => handleDraftChange("themeCategory", event.target.value)} />

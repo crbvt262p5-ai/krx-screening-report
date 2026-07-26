@@ -43,10 +43,6 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
     return hydrateValuationRows(portfolioRows);
   }
 
-  if (isVercelRuntime()) {
-    return hydrateValuationRows(normalizePortfolioRecords([...portfolioSeedRecords]));
-  }
-
   for (const filePath of resolvePortfolioPaths()) {
     try {
       const { read, utils } = await import("xlsx");
@@ -63,6 +59,10 @@ export async function loadDefaultPortfolioRows(): Promise<PortfolioPosition[]> {
     } catch {
       continue;
     }
+  }
+
+  if (isVercelRuntime()) {
+    return hydrateValuationRows(normalizePortfolioRecords([...portfolioSeedRecords]));
   }
 
   return hydrateValuationRows(normalizePortfolioRecords([...portfolioSeedRecords]));
