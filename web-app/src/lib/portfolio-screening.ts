@@ -34,6 +34,11 @@ function roundMetric(value: number | null) {
   return Math.round(value * 100) / 100;
 }
 
+function parseBoolean(value: unknown) {
+  const normalized = toCellString(value).toLowerCase();
+  return ["true", "1", "yes", "y", "예"].includes(normalized);
+}
+
 function mapScreeningRecord(record: RawRecord): PortfolioScreeningRecord {
   const prevClose = parseNullableNumber(record.prev_close);
   const trailingPer = parseNullableNumber(record.per);
@@ -68,6 +73,15 @@ function mapScreeningRecord(record: RawRecord): PortfolioScreeningRecord {
     consensusEpsEstimate: resolvedEpsEstimate,
     forwardPer: roundMetric(forwardPer),
     dividendYieldTrailing: parseNullableNumber(record.dividend_yield_trailing),
+    dividendYieldNormalized: parseNullableNumber(record.dividend_yield_normalized),
+    payoutRatioPct: parseNullableNumber(record.payout_ratio_pct),
+    dividendGrowthRatePct: parseNullableNumber(record.dividend_growth_rate_pct),
+    treasuryStockRatioPct: parseNullableNumber(record.treasury_stock_ratio_pct),
+    treasuryBurnRecent: parseBoolean(record.treasury_burn_recent),
+    payoutIncreaseFlag: parseBoolean(record.payout_increase_flag),
+    shareholderReturnScore: parseNullableNumber(record.shareholder_return_score),
+    payoutRepeatabilityScore: parseNullableNumber(record.payout_repeatability_score),
+    cashflowQualityScore: parseNullableNumber(record.cashflow_quality_score),
     returns6mPct: parseNullableNumber(record.returns_6m_pct),
     finalScore: parseNullableNumber(record.final_score),
     valueScore: parseNullableNumber(record.value_score),

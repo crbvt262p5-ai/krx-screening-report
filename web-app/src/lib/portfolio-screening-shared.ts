@@ -12,6 +12,15 @@ export type PortfolioScreeningRecord = {
   consensusEpsEstimate: number | null;
   forwardPer: number | null;
   dividendYieldTrailing: number | null;
+  dividendYieldNormalized: number | null;
+  payoutRatioPct: number | null;
+  dividendGrowthRatePct: number | null;
+  treasuryStockRatioPct: number | null;
+  treasuryBurnRecent: boolean;
+  payoutIncreaseFlag: boolean;
+  shareholderReturnScore: number | null;
+  payoutRepeatabilityScore: number | null;
+  cashflowQualityScore: number | null;
   returns6mPct: number | null;
   finalScore: number | null;
   valueScore: number | null;

@@ -398,14 +398,21 @@ function buildCriteriaRows(row: AdvisoryPortfolioPosition) {
         hasStrongValueDividendSupport(row) ? "positive" : (row.screening?.recommendationBucket === "가치함정 경고" ? "negative" : "neutral"),
     },
     {
-      label: "배당·현금흐름",
+      label: "배당·주주환원",
       value:
-        row.screening?.dividendYieldTrailing !== null && row.screening?.dividendYieldTrailing !== undefined
-          ? `배당 ${formatPct(row.screening.dividendYieldTrailing)}`
+        row.screening?.payoutRatioPct !== null && row.screening?.payoutRatioPct !== undefined
+          ? `성향 ${formatPct(row.screening.payoutRatioPct)} · 환원 ${formatScreeningScore(row.screening.shareholderReturnScore)}`
+          : row.screening?.dividendYieldTrailing !== null && row.screening?.dividendYieldTrailing !== undefined
+            ? `배당 ${formatPct(row.screening.dividendYieldTrailing)}`
           : row.styleBucket === "인컴"
             ? "인컴 성격"
             : "보통",
-      tone: (row.screening?.dividendYieldTrailing ?? 0) >= 4 || row.styleBucket === "인컴" ? "positive" : "neutral",
+      tone:
+        (row.screening?.shareholderReturnScore ?? 0) >= 2 ||
+        (row.screening?.dividendYieldNormalized ?? row.screening?.dividendYieldTrailing ?? 0) >= 4 ||
+        row.styleBucket === "인컴"
+          ? "positive"
+          : "neutral",
     },
     {
       label: "스크리닝 판정",
@@ -443,6 +450,23 @@ function buildCriteriaRows(row: AdvisoryPortfolioPosition) {
             : "neutral",
     },
   ];
+}
+
+function shareholderReturnLabel(row: AdvisoryPortfolioPosition) {
+  const score = row.screening?.shareholderReturnScore;
+  if (score === null || score === undefined) return "확인 필요";
+  if (score >= 4) return "강함";
+  if (score >= 2) return "양호";
+  if (score >= 0.5) return "보통";
+  return "약함";
+}
+
+function payoutStabilityLabel(row: AdvisoryPortfolioPosition) {
+  const score = row.screening?.payoutRepeatabilityScore;
+  if (score === null || score === undefined) return "확인 필요";
+  if (score >= 2) return "안정";
+  if (score >= 0.5) return "보통";
+  return "주의";
 }
 
 function buildWeaknessLabel(row: AdvisoryPortfolioPosition) {
@@ -2006,6 +2030,32 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                   </div>
                 </div>
 
+                <div className="shareholder-return-grid">
+                  <div>
+                    <span>배당수익률</span>
+                    <strong>
+                      {formatMetricOrPending(
+                        row.screening?.dividendYieldNormalized ?? row.screening?.dividendYieldTrailing ?? null,
+                        (value) => formatPct(value ?? 0),
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>배당성향</span>
+                    <strong>
+                      {formatMetricOrPending(row.screening?.payoutRatioPct ?? null, (value) => formatPct(value ?? 0))}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>환원 평가</span>
+                    <strong>{shareholderReturnLabel(row)}</strong>
+                  </div>
+                  <div>
+                    <span>배당 안정성</span>
+                    <strong>{payoutStabilityLabel(row)}</strong>
+                  </div>
+                </div>
+
                 <div className="screening-card screening-card-compact">
                   <div className="screening-card-top">
                     <strong>{screeningLabel(row)}</strong>
@@ -2128,6 +2178,75 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
                     <span>Fwd PER</span>
                     <strong>{formatMultiple(selectedRow.forwardPer)}</strong>
                   </div>
+                </div>
+                <div className="shareholder-return-panel">
+                  <div className="section-head">
+                    <div>
+                      <p className="section-kicker">주주환원</p>
+                      <h3>배당과 자사주 정책</h3>
+                    </div>
+                    <span className="badge">{shareholderReturnLabel(selectedRow)}</span>
+                  </div>
+                  <div className="shareholder-return-grid shareholder-return-grid-detailed">
+                    <div>
+                      <span>평년 배당수익률</span>
+                      <strong>
+                        {formatMetricOrPending(
+                          selectedRow.screening?.dividendYieldNormalized ??
+                            selectedRow.screening?.dividendYieldTrailing ??
+                            null,
+                          (value) => formatPct(value ?? 0),
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>배당성향</span>
+                      <strong>
+                        {formatMetricOrPending(
+                          selectedRow.screening?.payoutRatioPct ?? null,
+                          (value) => formatPct(value ?? 0),
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>배당 성장률</span>
+                      <strong>
+                        {formatMetricOrPending(
+                          selectedRow.screening?.dividendGrowthRatePct ?? null,
+                          (value) => formatPct(value ?? 0),
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>배당 반복성</span>
+                      <strong>{payoutStabilityLabel(selectedRow)}</strong>
+                    </div>
+                    <div>
+                      <span>자사주 비율</span>
+                      <strong>
+                        {formatMetricOrPending(
+                          selectedRow.screening?.treasuryStockRatioPct ?? null,
+                          (value) => formatPct(value ?? 0),
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>최근 소각</span>
+                      <strong>{selectedRow.screening ? (selectedRow.screening.treasuryBurnRecent ? "확인" : "미확인") : "연동 필요"}</strong>
+                    </div>
+                    <div>
+                      <span>배당 확대</span>
+                      <strong>{selectedRow.screening ? (selectedRow.screening.payoutIncreaseFlag ? "확인" : "미확인") : "연동 필요"}</strong>
+                    </div>
+                    <div>
+                      <span>환원 점수</span>
+                      <strong>{formatScreeningScore(selectedRow.screening?.shareholderReturnScore)}</strong>
+                    </div>
+                  </div>
+                  <p className="shareholder-return-note">
+                    자사주 소각과 배당 확대는 최근 공시·뉴스에서 확인된 경우만 표시합니다. 미확인은 없다는 뜻이 아니라
+                    현재 데이터에서 확인되지 않았다는 뜻입니다.
+                  </p>
                 </div>
                 <div className="screening-card screening-card-detailed">
                   <div className="section-head">
