@@ -469,6 +469,23 @@ function payoutStabilityLabel(row: AdvisoryPortfolioPosition) {
   return "주의";
 }
 
+function heatmapSizeClass(weight: number) {
+  if (weight >= 8) return "portfolio-map-cell-xl";
+  if (weight >= 5) return "portfolio-map-cell-lg";
+  if (weight >= 3) return "portfolio-map-cell-md";
+  if (weight >= 1.5) return "portfolio-map-cell-sm";
+  return "portfolio-map-cell-xs";
+}
+
+function heatmapTone(changePct: number | null, weightGap: number) {
+  const signal = changePct ?? -weightGap;
+  if (signal >= 2) return "heat-gain-strong";
+  if (signal >= 0.4) return "heat-gain";
+  if (signal <= -2) return "heat-loss-strong";
+  if (signal <= -0.4) return "heat-loss";
+  return "heat-flat";
+}
+
 function buildWeaknessLabel(row: AdvisoryPortfolioPosition) {
   if (hasIdentityUncertainty(row)) {
     return "정확한 종목 식별이 먼저 필요합니다.";
@@ -1355,6 +1372,108 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
 
       {workspaceTab === "overview" ? (
         <>
+          <section className="market-map-shell">
+            <div className="market-map-head">
+              <div>
+                <p className="section-kicker">PORTFOLIO MAP</p>
+                <h2>보유 종목 시장 지도</h2>
+                <p>박스 크기 = 실제 비중 · 색상 = 당일 등락률(시세 대기 시 목표 갭) · 클릭 = 종목 상세</p>
+              </div>
+              <div className="market-map-legend" aria-label="등락률 색상 범례">
+                <span className="legend-loss">-2% 이하</span>
+                <span className="legend-flat">보합</span>
+                <span className="legend-gain">+2% 이상</span>
+              </div>
+            </div>
+
+            <div className="market-map-layout">
+              <div className="portfolio-map-grid">
+                {displayRows.map((row) => {
+                  const marketSnapshot = getMarketSnapshot(row.rowId);
+                  const changePct = marketSnapshot?.changePct ?? null;
+                  const weightGap = row.actualWeightPct - row.targetWeightPct;
+                  return (
+                    <button
+                      key={`map-${row.rowId}`}
+                      className={`portfolio-map-cell ${heatmapSizeClass(row.actualWeightPct)} ${heatmapTone(changePct, weightGap)}`}
+                      type="button"
+                      title={`${row.name} · ${formatPct(row.actualWeightPct)} · ${changePct !== null ? formatSignedPct(changePct) : formatGap(row.actualWeightPct, row.targetWeightPct)}`}
+                      onClick={() => selectRow(row)}
+                    >
+                      <span className="portfolio-map-theme">{row.theme}</span>
+                      <strong>{row.name}</strong>
+                      <span className="portfolio-map-weight">{formatPct(row.actualWeightPct)}</span>
+                      <span className="portfolio-map-change">
+                        {changePct !== null ? formatSignedPct(changePct) : `갭 ${formatGap(row.actualWeightPct, row.targetWeightPct)}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <aside className="market-map-side">
+                <article className="finviz-widget">
+                  <div className="finviz-widget-head">
+                    <div>
+                      <span>THEME EXPOSURE</span>
+                      <strong>테마 집중도</strong>
+                    </div>
+                    <b>{snapshot.themeCount}개</b>
+                  </div>
+                  <div className="exposure-bars">
+                    {snapshot.themeMix.slice(0, 7).map((item) => (
+                      <div className="exposure-row" key={`exposure-${item.label}`}>
+                        <div>
+                          <strong>{item.label}</strong>
+                          <span>{formatPct(item.actualWeightPct)}</span>
+                        </div>
+                        <div className="exposure-track">
+                          <i style={{ width: `${Math.min(100, item.actualWeightPct * 4)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="finviz-widget value-map-widget">
+                  <div className="finviz-widget-head">
+                    <div>
+                      <span>VALUE MAP</span>
+                      <strong>PBR × PER 분포</strong>
+                    </div>
+                    <b>낮을수록 좌하단</b>
+                  </div>
+                  <div className="value-map-axis">
+                    <span className="value-map-y">PER</span>
+                    <span className="value-map-x">PBR</span>
+                    <i className="value-map-mid-x" />
+                    <i className="value-map-mid-y" />
+                    {displayRows
+                      .filter((row) => row.per !== null && row.pbr !== null && row.per! > 0 && row.pbr! > 0)
+                      .slice(0, 18)
+                      .map((row) => (
+                        <button
+                          key={`value-map-${row.rowId}`}
+                          className="value-map-dot"
+                          type="button"
+                          title={`${row.name} · PER ${formatMultiple(row.per)} · PBR ${formatMultiple(row.pbr)}`}
+                          style={{
+                            left: `${Math.min(92, Math.max(5, ((row.pbr ?? 0) / 5) * 90))}%`,
+                            bottom: `${Math.min(90, Math.max(7, ((row.per ?? 0) / 40) * 84))}%`,
+                            width: `${Math.min(24, 8 + row.actualWeightPct * 1.4)}px`,
+                            height: `${Math.min(24, 8 + row.actualWeightPct * 1.4)}px`,
+                          }}
+                          onClick={() => selectRow(row)}
+                        >
+                          <span>{row.name.slice(0, 2)}</span>
+                        </button>
+                      ))}
+                  </div>
+                </article>
+              </aside>
+            </div>
+          </section>
+
           <section className="overview-hero-grid">
             <section className="panel overview-summary-panel">
               <div className="section-head">
