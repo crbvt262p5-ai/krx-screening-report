@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "멍칼로리 계산기",
-  description: "강아지별 사료와 간식 칼로리를 관리하는 모바일 우선 웹앱",
-  applicationName: "멍칼로리 계산기",
+  title: "내 투자자산 | 포트폴리오 대시보드",
+  description: "보유자산, 수익률, 비중과 투자 인사이트를 한눈에 확인하는 포트폴리오 대시보드",
+  applicationName: "내 투자자산",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "멍칼로리 계산기",
+    title: "내 투자자산",
   },
   formatDetection: {
     telephone: false,

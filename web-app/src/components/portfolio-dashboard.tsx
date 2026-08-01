@@ -21,7 +21,7 @@ type PortfolioDashboardProps = {
   screeningRecords: PortfolioScreeningRecord[];
 };
 
-type WorkspaceTab = "overview" | "analysis" | "positions" | "editor";
+type WorkspaceTab = "home" | "overview" | "analysis" | "positions" | "editor";
 type ScreenedPortfolioPosition = PortfolioPosition & {
   screening: PortfolioScreeningRecord | null;
 };
@@ -486,6 +486,20 @@ function heatmapTone(changePct: number | null, weightGap: number) {
   return "heat-flat";
 }
 
+function parseSavedPositionValue(notes: string) {
+  const match = notes.replaceAll(",", "").match(/평가\s*([\d.]+)원/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseSavedReturnPct(notes: string) {
+  const match = notes.match(/수익률\s*(-?[\d.]+)%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
 function buildWeaknessLabel(row: AdvisoryPortfolioPosition) {
   if (hasIdentityUncertainty(row)) {
     return "정확한 종목 식별이 먼저 필요합니다.";
@@ -662,7 +676,7 @@ function sortPnlEntries(entries: Array<{ label: string; value: number }>) {
 export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioDashboardProps) {
   const usesCloudStorage = hasSupabaseEnv();
   const [rows, setRows] = useState(initialRows);
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("overview");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("home");
   const [query, setQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState("전체");
   const [actionFilter, setActionFilter] = useState("전체");
@@ -1199,6 +1213,37 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const weakestThemePnl = [...dayPnlThemeMix].reverse().find((item) => item.value < 0) ?? null;
   const domesticDayPnl = dayPnlRegionMix.find((item) => item.label === "국내")?.value ?? null;
   const overseasDayPnl = dayPnlRegionMix.find((item) => item.label === "해외")?.value ?? null;
+  const gatewayPortfolio = useMemo(() => {
+    let totalValue = 0;
+    let totalPrincipal = 0;
+    let domesticValue = 0;
+    let overseasValue = 0;
+
+    for (const row of displayRows) {
+      const savedValue = parseSavedPositionValue(row.notes);
+      const liveValue = marketSnapshots[row.rowId]?.estimatedHoldingValueKrw ?? null;
+      const resolvedValue = liveValue ?? savedValue ?? 0;
+      const returnPct = parseSavedReturnPct(row.notes);
+      const principal =
+        savedValue !== null && returnPct !== null && returnPct > -99.9
+          ? savedValue / (1 + returnPct / 100)
+          : resolvedValue;
+
+      totalValue += resolvedValue;
+      totalPrincipal += principal;
+      if (row.marketScope === "국내") domesticValue += resolvedValue;
+      if (row.marketScope === "해외") overseasValue += resolvedValue;
+    }
+
+    return {
+      totalValue: Math.round(totalValue),
+      totalPrincipal: Math.round(totalPrincipal),
+      totalProfit: Math.round(totalValue - totalPrincipal),
+      totalReturnPct: totalPrincipal > 0 ? ((totalValue - totalPrincipal) / totalPrincipal) * 100 : 0,
+      domesticValue: Math.round(domesticValue),
+      overseasValue: Math.round(overseasValue),
+    };
+  }, [displayRows, marketSnapshots]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1283,6 +1328,115 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      {workspaceTab === "home" ? (
+        <section className="gateway-shell">
+          <div className="gateway-topbar">
+            <div>
+              <p className="section-kicker">MY PORTFOLIO</p>
+              <h1>내 투자자산</h1>
+            </div>
+            <div className="gateway-top-actions">
+              <label className="gateway-upload portfolio-upload">
+                캡처·엑셀 업데이트
+                <input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleUploadFile} />
+              </label>
+              <button className="gateway-detail-button" type="button" onClick={() => setWorkspaceTab("overview")}>
+                상세 대시보드 보기
+              </button>
+            </div>
+          </div>
+
+          <div className="gateway-balance">
+            <span>총 평가자산</span>
+            <strong>{formatCurrency(gatewayPortfolio.totalValue)}</strong>
+            <div>
+              <b className={gatewayPortfolio.totalProfit < 0 ? "loss-text" : "gain-text"}>
+                {formatSignedCurrency(gatewayPortfolio.totalProfit)} ({formatSignedPct(gatewayPortfolio.totalReturnPct)})
+              </b>
+              <small>
+                {marketFetchedAt
+                  ? `시세 갱신 ${new Date(marketFetchedAt).toLocaleTimeString("ko-KR")}`
+                  : "최근 보유 캡처 평가금액 기준"}
+              </small>
+            </div>
+          </div>
+
+          <div className="gateway-metric-grid">
+            <article>
+              <span>추정 투자원금</span>
+              <strong>{formatCurrency(gatewayPortfolio.totalPrincipal)}</strong>
+            </article>
+            <article>
+              <span>오늘 손익</span>
+              <strong className={portfolioDayPnlKrw < 0 ? "loss-text" : "gain-text"}>
+                {marketCoverageCount > 0 ? formatSignedCurrency(portfolioDayPnlKrw) : "시세 대기"}
+              </strong>
+            </article>
+            <article>
+              <span>국내 자산</span>
+              <strong>{formatCurrency(gatewayPortfolio.domesticValue)}</strong>
+              <small>{formatPct(snapshot.domesticWeight)}</small>
+            </article>
+            <article>
+              <span>해외 자산</span>
+              <strong>{formatCurrency(gatewayPortfolio.overseasValue)}</strong>
+              <small>{formatPct(snapshot.overseasWeight)}</small>
+            </article>
+          </div>
+
+          <div className="gateway-allocation-track" aria-label="국내 해외 자산 배분">
+            <i style={{ width: `${snapshot.domesticWeight}%` }} />
+            <b style={{ width: `${snapshot.overseasWeight}%` }} />
+          </div>
+
+          <div className="gateway-lower-grid">
+            <section className="gateway-holdings">
+              <div className="gateway-section-head">
+                <strong>상위 보유</strong>
+                <span>전체 {snapshot.holdingCount}종목</span>
+              </div>
+              {displayRows.slice(0, 4).map((row, index) => (
+                <button key={`gateway-${row.rowId}`} type="button" onClick={() => selectRow(row)}>
+                  <span className="gateway-rank">{index + 1}</span>
+                  <div>
+                    <strong>{row.name}</strong>
+                    <small>{row.theme} · {row.marketScope}</small>
+                  </div>
+                  <b>{formatPct(row.actualWeightPct)}</b>
+                </button>
+              ))}
+            </section>
+
+            <section className="gateway-checkup">
+              <div className="gateway-section-head">
+                <strong>포트 점검</strong>
+                <span>현재 기준</span>
+              </div>
+              <button type="button" onClick={() => setWorkspaceTab("analysis")}>
+                <div>
+                  <span>가장 큰 테마</span>
+                  <strong>{topThemes[0]?.label ?? "미분류"}</strong>
+                </div>
+                <b>{topThemes[0] ? formatPct(topThemes[0].actualWeightPct) : "-"}</b>
+              </button>
+              <button type="button" onClick={() => setWorkspaceTab("analysis")}>
+                <div>
+                  <span>비중축소 점검</span>
+                  <strong>{trimCandidates.length}종목</strong>
+                </div>
+                <b>확인</b>
+              </button>
+              <button type="button" onClick={() => setWorkspaceTab("positions")}>
+                <div>
+                  <span>데이터 확인 필요</span>
+                  <strong>{Math.max(0, displayRows.length - screeningConnectedCount)}종목</strong>
+                </div>
+                <b>보기</b>
+              </button>
+            </section>
+          </div>
+        </section>
+      ) : (
       <section className="hero-panel">
         <div className="space-y-3">
           <p className="eyebrow">포트 대시보드</p>
@@ -1326,6 +1480,10 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
         </div>
 
         <div className="workspace-tab-bar">
+          <button className="workspace-tab workspace-home-tab" type="button" onClick={() => setWorkspaceTab("home")}>
+            <strong>홈</strong>
+            <span>총자산으로 돌아가기</span>
+          </button>
           {workspaceTabs.map((tab) => (
             <button
               key={tab.key}
@@ -1339,17 +1497,18 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
           ))}
         </div>
       </section>
+      )}
 
-      <div className="inline-status-bar">
+      {workspaceTab !== "home" ? <div className="inline-status-bar">
         <p className="inline-status">{statusMessage}</p>
         {marketFetchedAt ? (
           <p className="inline-status market-status">
             시세 갱신 {new Date(marketFetchedAt).toLocaleTimeString("ko-KR")}
           </p>
         ) : null}
-      </div>
+      </div> : null}
 
-      {unresolvedEnrichmentItems.length > 0 ? (
+      {workspaceTab !== "home" && unresolvedEnrichmentItems.length > 0 ? (
         <section className="panel unresolved-panel">
           <div className="section-head">
             <div>
