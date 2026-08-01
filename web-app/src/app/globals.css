@@ -1,5 +1,138 @@
 @import "tailwindcss";
 
+.portfolio-login-shell {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(53, 196, 138, 0.16), transparent 32%),
+    linear-gradient(145deg, #f2f7f4 0%, #ffffff 48%, #eef5f1 100%);
+  color: #15251d;
+}
+
+.portfolio-login-card {
+  width: min(100%, 420px);
+  padding: 42px 36px 32px;
+  border: 1px solid rgba(21, 72, 46, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 24px 70px rgba(28, 74, 51, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.portfolio-login-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: #176b46;
+  color: #fff;
+  font-size: 21px;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(23, 107, 70, 0.24);
+}
+
+.portfolio-login-eyebrow {
+  margin: 28px 0 8px;
+  color: #56806b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.portfolio-login-card h1 {
+  margin: 0;
+  font-size: clamp(30px, 7vw, 40px);
+  line-height: 1.15;
+  letter-spacing: -0.05em;
+}
+
+.portfolio-login-copy {
+  margin: 13px 0 0;
+  color: #64736b;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.portfolio-login-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.portfolio-login-form label {
+  color: #395244;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.portfolio-login-form input {
+  width: 100%;
+  height: 54px;
+  padding: 0 16px;
+  border: 1px solid #d9e4dd;
+  border-radius: 15px;
+  outline: none;
+  background: #f9fbfa;
+  color: #14231b;
+  font: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.portfolio-login-form input:focus {
+  border-color: #23875c;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(35, 135, 92, 0.1);
+}
+
+.portfolio-login-form button {
+  height: 54px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 15px;
+  background: #176b46;
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(23, 107, 70, 0.2);
+}
+
+.portfolio-login-form button:disabled {
+  background: #9eaaa4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.portfolio-login-error {
+  margin: 0;
+  color: #c43b3b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.portfolio-login-note {
+  margin: 22px 0 0;
+  color: #8a9890;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .portfolio-login-shell {
+    align-items: end;
+    padding: 16px;
+  }
+
+  .portfolio-login-card {
+    padding: 34px 24px 28px;
+    border-radius: 26px;
+  }
+}
+
 :root {
   --background: #f5f7fb;
   --foreground: #191f28;

@@ -35,6 +35,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# private portfolio snapshots
+/data/*.csv
+
 # vercel
 .vercel
 

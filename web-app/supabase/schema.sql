@@ -149,10 +149,9 @@ drop policy if exists "public write feeding logs" on public.feeding_logs;
 create policy "public write feeding logs" on public.feeding_logs for insert with check (true);
 
 drop policy if exists "public read portfolio positions" on public.portfolio_positions;
-create policy "public read portfolio positions" on public.portfolio_positions for select using (true);
-
 drop policy if exists "public write portfolio positions" on public.portfolio_positions;
-create policy "public write portfolio positions" on public.portfolio_positions for insert with check (true);
-
 drop policy if exists "public update portfolio positions" on public.portfolio_positions;
-create policy "public update portfolio positions" on public.portfolio_positions for update using (true) with check (true);
+drop policy if exists "public delete portfolio positions" on public.portfolio_positions;
+
+-- Portfolio data is private. The application accesses it only with the server-side
+-- service role after its own password gate has authenticated the request.
