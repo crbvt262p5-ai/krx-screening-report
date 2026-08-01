@@ -1,7 +1,5 @@
 # Dog Food Tracker Web App
 
-> 포트폴리오 대시보드의 제품 방향, 투자 판단 기준과 운영 절차는 [PORTFOLIO_DASHBOARD.md](./PORTFOLIO_DASHBOARD.md)를 기준으로 관리합니다.
-
 강아지 프로필을 기준으로 사료/간식 칼로리를 계산하고, 하루 급여 기록까지 남기는 모바일 우선 웹앱입니다.
 
 ## 현재 구현 범위
