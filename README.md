@@ -29,5 +29,3 @@ KOSPI/KOSDAQ 전체 종목을 장 마감 후 자동으로 수집하고, Value bu
 Telegram 채널 요약 MVP도 함께 들어 있습니다.
 
 - 코드: `telegram_digest/`
-# My-investment
-# My-investment

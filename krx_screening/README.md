@@ -104,6 +104,55 @@ CSV에는 아래 값이 포함됩니다.
 - Value Score, Growth Early Score, Dividend Potential Score
 - 제외/통과 사유, 단계 판정, 태그, `missing_data`
 
+## Portfolio Overlay
+
+스크리닝 리포트 위에 내 보유 종목 운영판을 덧씌우려면 아래 파일을 추가하면 됩니다.
+
+- 템플릿: `/Users/taeheehong/Documents/Playground/krx_screening/portfolio_positions.template.csv`
+- 실제 입력 파일: `/Users/taeheehong/Documents/Playground/data/portfolio_positions.csv`
+
+예시 절차:
+
+```bash
+cp /Users/taeheehong/Documents/Playground/krx_screening/portfolio_positions.template.csv \
+  /Users/taeheehong/Documents/Playground/data/portfolio_positions.csv
+```
+
+주요 컬럼:
+
+- `ticker`: 6자리 종목코드
+- `name`: 선택 입력, 비워두면 스크리닝 데이터의 종목명을 사용
+- `market_scope`: `국내` / `해외`
+- `asset_class`: `주식` / `ETF` / `리츠` 등
+- `country`: 한국, 미국, 일본처럼 국가 구분
+- `theme`: 반도체, 금융, 방산처럼 내가 보는 테마
+- `sub_theme`: HBM, 은행, 지주사, 배당 ETF처럼 한 단계 더 세부 분류
+- `strategy`: 배당, 턴어라운드, 성장, 트레이딩 등 운영 전략
+- `style_bucket`: `성장`, `인컴`, `패시브`, `혼합` 같은 스타일 분류
+- `trend_view`: `추세 초기`, `추세 진행`, `과열 경계`, `추세 확인 필요`
+- `cycle_view`: `주도`, `리더 후보`, `상승 사이클`, `과열 구간`, `중립`
+- `conviction`: `핵심`, `중간`, `위성`
+- `fx_exposure`: `높음`, `낮음`
+- `timing_view`: 초입 분할, 눌림 대기, 실적 확인 후 등 매수 타이밍 메모
+- `actual_weight_pct`: 현재 실제 비중
+- `target_weight_pct`: 목표 비중
+- `planned_action`: 직접 `추가매수 검토`, `비중축소 검토`, `정리 검토`, `보유 유지` 등을 넣을 수 있음
+- `notes`: 전략 수정 이유나 체크포인트 메모
+
+비워 둬도 되는 컬럼:
+
+- `market_scope`, `asset_class`, `country`, `style_bucket`, `trend_view`, `cycle_view`, `conviction`, `fx_exposure`
+
+이 값들은 비어 있으면 리포트가 티커/시장/ETF 이름 패턴/스크리닝 stage를 보고 자동으로 임시 분류합니다.
+
+이 파일이 있으면 HTML/Markdown 리포트 상단에 아래가 자동으로 추가됩니다.
+
+- 테마별 실제 비중 vs 목표 비중
+- 국내/해외 비중, 주식/ETF 비중
+- 추세 분류별 비중
+- 추가매수/축소/정리 액션 버킷
+- 스크리닝 결과를 덮어쓴 리뷰 우선순위 큐
+
 ## Scoring Rules
 
 ### Value bucket

@@ -77,6 +77,7 @@ def _build_markdown(
     frame: pd.DataFrame,
 ) -> str:
     working = _normalize_frame(frame)
+    portfolio = _load_portfolio_frame(settings, working)
     history = _load_recent_top_counts(settings, trading_date)
     summary = _summary_metrics(equities, working)
     buy_review = working[working["recommendation_bucket"] == "실매수 검토"].sort_values(
@@ -133,6 +134,7 @@ def _build_markdown(
     ).head(12)
     issue_focus = _issue_focus_rows(working, limit=12)
     special_dividend_watch = _special_dividend_watchlist(working, limit=12)
+    portfolio_markdown = _portfolio_section_markdown(portfolio)
 
     parts = [
         f"# KRX Daily Screening Report ({trading_date.isoformat()})",
@@ -150,6 +152,10 @@ def _build_markdown(
         f"- 소액 관찰: {summary['small_watch']} 종목",
         f"- 가치함정 경고: {summary['trap_watch']} 종목",
         f"- Historical cache assists: {summary['cache_rows']} 종목",
+    ]
+    if portfolio_markdown:
+        parts.extend(["", portfolio_markdown])
+    parts.extend([
         "",
         "## Bucket Definitions",
         _bucket_definitions_markdown(),
@@ -211,7 +217,7 @@ def _build_markdown(
         "- `Core missing fields` 는 가격/시총/PER/PBR/배당/3개년 실적처럼 핵심 판단 항목 기준입니다.",
         "- 상단 추천은 최근 반복 노출, 업종 쏠림, 시총 쏠림을 완화한 `다변화 뷰` 기준입니다.",
         "- `Special Dividend Watch` 는 최근 실제 배당수익률이 평년화 배당수익률보다 과도하게 높아 착시 가능성이 있는 종목입니다.",
-    ]
+    ])
     return "\n".join(parts)
 
 
@@ -222,6 +228,7 @@ def _build_html(
     frame: pd.DataFrame,
 ) -> str:
     working = _normalize_frame(frame)
+    portfolio = _load_portfolio_frame(settings, working)
     history = _load_recent_top_counts(settings, trading_date)
     summary = _summary_metrics(equities, working)
     buy_review = working[working["recommendation_bucket"] == "실매수 검토"].sort_values(
@@ -322,6 +329,7 @@ def _build_html(
     issue_focus_html = _issue_digest_html(issue_focus)
     special_watch_html = _html_table(special_dividend_watch, bucket="special_dividend")
     spotlight_html = _spotlight_strip(value_top, growth_top, leader_top)
+    portfolio_html = _portfolio_section_html(portfolio)
     universe_json = json.dumps(_records_for_ui(full_list), ensure_ascii=False)
     value_table = _html_table(value_top, bucket="value")
     growth_table = _html_table(growth_top, bucket="growth")
@@ -332,6 +340,26 @@ def _build_html(
     missing_html = "".join(
         f'<span class="chip">{escape(name)} {count}</span>' for name, count in missing_counts
     )
+    dashboard_html = _summary_dashboard_html(
+        working=working,
+        summary=summary,
+        buy_review=buy_review,
+        value_core=value_core,
+        growth_core=growth_core,
+        leader_top=leader_top,
+        leader_candidate=leader_candidate,
+        small_watch=small_watch,
+        trap_watch=trap_watch,
+    )
+    detail_focus = _build_detail_focus_rows(
+        value_core=value_core,
+        growth_core=growth_core,
+        leader_top=leader_top,
+        leader_candidate=leader_candidate,
+        small_watch=small_watch,
+        trap_watch=trap_watch,
+    )
+    detail_deck_html = _detail_deck_html(detail_focus)
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -455,6 +483,24 @@ def _build_html(
       line-height: 1.65;
       font-size: 14px;
     }}
+    .jump-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }}
+    .jump-link {{
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.78);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+    }}
     .section {{
       margin-top: 20px;
       background: var(--panel);
@@ -511,6 +557,64 @@ def _build_html(
       padding-left: 18px;
       font-size: 13px;
       line-height: 1.65;
+    }}
+    .dashboard-grid {{
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 16px;
+    }}
+    .dashboard-panel {{
+      border-radius: 20px;
+      padding: 18px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+    }}
+    .dashboard-panel h3 {{
+      margin: 0 0 12px;
+      font-size: 18px;
+    }}
+    .bar-list {{
+      display: grid;
+      gap: 10px;
+    }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: 110px 1fr 48px;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+    }}
+    .bar-track {{
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(28,26,24,0.08);
+      overflow: hidden;
+    }}
+    .bar-fill {{
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--value), #14b8a6);
+    }}
+    .bar-fill.growth {{ background: linear-gradient(90deg, var(--growth), #f59e0b); }}
+    .bar-fill.danger {{ background: linear-gradient(90deg, var(--danger), #ef4444); }}
+    .mini-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }}
+    .mini-table th, .mini-table td {{
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }}
+    .mini-table th {{
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: transparent;
+      position: static;
     }}
     .memo-panel {{
       border-radius: 22px;
@@ -712,6 +816,15 @@ def _build_html(
       color: #1d4ed8;
       font-weight: 700;
     }}
+    a.stock-link {{
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(44, 36, 27, 0.18);
+    }}
+    a.stock-link:hover {{
+      color: var(--value);
+      border-bottom-color: var(--value);
+    }}
     .controls {{
       display: flex;
       gap: 10px;
@@ -780,14 +893,58 @@ def _build_html(
       color: var(--muted);
       font-size: 13px;
     }}
+    .detail-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }}
+    .detail-card {{
+      border-radius: 20px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+    }}
+    .detail-card:target {{
+      outline: 2px solid rgba(15, 118, 110, 0.24);
+      box-shadow: 0 0 0 6px rgba(15, 118, 110, 0.08);
+    }}
+    .detail-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+    }}
+    .detail-facts {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }}
+    .detail-facts div {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .detail-facts strong {{
+      display: block;
+      color: var(--text);
+      margin-top: 4px;
+      font-size: 17px;
+    }}
     @media (max-width: 1100px) {{
-      .metric-grid, .memo-grid, .card-grid, .definition-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .metric-grid, .memo-grid, .card-grid, .definition-grid, .detail-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .dashboard-grid {{ grid-template-columns: 1fr; }}
     }}
     @media (max-width: 720px) {{
       .shell {{ width: min(100vw - 20px, 100%); margin: 12px auto 28px; }}
       .hero, .section {{ padding: 18px; border-radius: 20px; }}
-      .metric-grid, .memo-grid, .card-grid, .definition-grid {{ grid-template-columns: 1fr; }}
+      .metric-grid, .memo-grid, .card-grid, .definition-grid, .detail-grid {{ grid-template-columns: 1fr; }}
       .controls input, .controls select {{ width: 100%; min-width: 0; }}
+      .bar-row {{ grid-template-columns: 88px 1fr 40px; }}
+      .detail-facts {{ grid-template-columns: 1fr 1fr; }}
     }}
   </style>
 </head>
@@ -800,15 +957,29 @@ def _build_html(
           <h1>{escape(trading_date.isoformat())}</h1>
           <p>오늘의 결론만 먼저 보이도록 정리했습니다. 상단은 실제 투자 행동 기준으로 묶고, 세부 표와 렌즈는 아래로 접었습니다.</p>
           <div class="hero-note">먼저 `Cycle Leader`와 `Leader Candidate`를 보고, 그 다음 `Value Core`와 `Growth Core`를 확인하면 됩니다. 점수보다 이번 사이클에서 누가 실제로 앞서가는지 먼저 읽는 구조입니다.</div>
+          <div class="jump-row">
+            <a class="jump-link" href="#summary-dashboard">요약 보드</a>
+            <a class="jump-link" href="#today-memo">오늘의 메모</a>
+            <a class="jump-link" href="#detail-deck">종목 상세</a>
+            <a class="jump-link" href="#candidate-explorer">탐색기</a>
+          </div>
         </div>
       </div>
       <div class="metric-grid">{summary_html}</div>
     </section>
-    <section class="section">
+    <section class="section" id="summary-dashboard">
+      <div class="section-head">
+        <h2>한눈에 보기</h2>
+        <span>분포와 핵심 표를 먼저 보고 상세 카드로 내려갑니다.</span>
+      </div>
+      {dashboard_html}
+    </section>
+    <section class="section" id="today-memo">
       <div class="section-head">
         <h2>오늘의 메모</h2>
         <span>실제 행동 기준으로만 네 그룹을 나눴습니다.</span>
       </div>
+      {portfolio_html}
       <div class="definition-grid">
         {definitions_html}
       </div>
@@ -890,6 +1061,7 @@ def _build_html(
             <h2>Candidate Explorer</h2>
             <span>상위 200개 비제외 종목 검색/필터</span>
           </div>
+          <div id="candidate-explorer"></div>
           <div class="explorer-summary">
             <span class="chip strong">탐색 대상 {len(full_list):,}개</span>
             <span class="chip">정렬 기준 최종점수</span>
@@ -947,6 +1119,11 @@ def _build_html(
               <tbody id="universeBody"></tbody>
             </table>
           </div>
+          <div class="section-head" style="margin-top:22px;">
+            <h2 id="detail-deck">종목 상세 카드</h2>
+            <span>상단 카드와 탐색기에서 누르면 이 상세 카드로 내려옵니다.</span>
+          </div>
+          <div class="detail-grid">{detail_deck_html}</div>
         </div>
       </details>
     </section>
@@ -966,6 +1143,10 @@ def _build_html(
     function fmt(value, suffix = "") {{
       if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "-";
       return `${{Number(value).toLocaleString("ko-KR", {{ maximumFractionDigits: 2 }})}}${{suffix}}`;
+    }}
+
+    function detailHref(row) {{
+      return row.ticker ? `#detail-${{row.ticker}}` : "#detail-deck";
     }}
 
     function renderUniverse() {{
@@ -996,7 +1177,7 @@ def _build_html(
 
       body.innerHTML = filtered.map((row) => `
         <tr>
-          <td><strong>${{row.name}}</strong><div class="subtle">${{row.ticker}}</div></td>
+          <td><strong><a class="stock-link" href="${{detailHref(row)}}">${{row.name}}</a></strong><div class="subtle">${{row.ticker}}</div></td>
           <td>${{row.market || "-"}}</td>
           <td>${{row.sector || "-"}}</td>
           <td>${{row.size_bucket || "-"}}</td>
@@ -1329,6 +1510,620 @@ def _load_recent_top_counts(settings: Settings, trading_date: date) -> dict[str,
     }
 
 
+def _load_portfolio_frame(settings: Settings, working: pd.DataFrame) -> pd.DataFrame | None:
+    path = settings.data_dir / "portfolio_positions.csv"
+    if not path.exists():
+        return None
+
+    try:
+        portfolio = pd.read_csv(path, encoding="utf-8-sig", dtype={"ticker": str})
+    except Exception:
+        return None
+    if portfolio.empty or "ticker" not in portfolio.columns:
+        return None
+
+    portfolio = portfolio.rename(columns=lambda value: str(value).strip())
+    portfolio["ticker"] = (
+        portfolio["ticker"]
+        .fillna("")
+        .astype(str)
+        .str.replace(r"\.0$", "", regex=True)
+        .str.strip()
+    )
+    digit_mask = portfolio["ticker"].str.fullmatch(r"\d+")
+    portfolio.loc[digit_mask, "ticker"] = portfolio.loc[digit_mask, "ticker"].str.zfill(6)
+    portfolio = portfolio[portfolio["ticker"] != ""].copy()
+    if portfolio.empty:
+        return None
+
+    text_defaults = {
+        "name": "",
+        "market_scope": "",
+        "asset_class": "",
+        "country": "",
+        "theme": "미분류",
+        "sub_theme": "",
+        "strategy": "",
+        "style_bucket": "",
+        "trend_view": "",
+        "cycle_view": "",
+        "conviction": "",
+        "fx_exposure": "",
+        "timing_view": "",
+        "planned_action": "",
+        "notes": "",
+    }
+    for column, default in text_defaults.items():
+        if column not in portfolio.columns:
+            portfolio[column] = default
+        portfolio[column] = portfolio[column].fillna(default).astype(str).str.strip()
+        portfolio.loc[portfolio[column] == "", column] = default
+
+    for column in ("actual_weight_pct", "target_weight_pct", "avg_buy_price"):
+        if column not in portfolio.columns:
+            portfolio[column] = pd.NA
+        portfolio[column] = pd.to_numeric(portfolio[column], errors="coerce")
+
+    market_columns = [
+        "ticker",
+        "name",
+        "market",
+        "sector",
+        "size_bucket",
+        "prev_close",
+        "returns_6m_pct",
+        "final_score",
+        "core_bucket",
+        "leader_bucket",
+        "recommendation_bucket",
+        "stage",
+        "tags",
+        "important_news_items",
+        "important_disclosures",
+        "missing_data",
+        "excluded",
+    ]
+    available_columns = [column for column in market_columns if column in working.columns]
+    screen_lookup = working[available_columns].copy()
+    merged = portfolio.merge(
+        screen_lookup.drop_duplicates(subset=["ticker"]),
+        on="ticker",
+        how="left",
+        suffixes=("", "_screen"),
+    )
+    if "name" in screen_lookup.columns:
+        missing_match = merged["market"].isna() if "market" in merged.columns else pd.Series(False, index=merged.index)
+        if missing_match.any():
+            by_name = screen_lookup.drop_duplicates(subset=["name"]).add_suffix("_by_name")
+            merged = merged.merge(
+                by_name,
+                left_on="name",
+                right_on="name_by_name",
+                how="left",
+            )
+            for column in available_columns:
+                if column == "name":
+                    continue
+                base = column
+                fallback = f"{column}_by_name"
+                if base in merged.columns and fallback in merged.columns:
+                    merged.loc[missing_match, base] = merged.loc[missing_match, base].where(
+                        merged.loc[missing_match, base].notna(),
+                        merged.loc[missing_match, fallback],
+                    )
+            drop_columns = [f"{column}_by_name" for column in available_columns if f"{column}_by_name" in merged.columns]
+            merged = merged.drop(columns=drop_columns, errors="ignore")
+    merged["display_name"] = merged["name"].where(merged["name"].ne(""), merged.get("name_screen", ""))
+    merged["display_name"] = merged["display_name"].fillna(merged.get("name_screen", "")).replace("", "-")
+    derived = merged.apply(_derive_portfolio_classification, axis=1, result_type="expand")
+    for column in derived.columns:
+        empty_mask = merged[column].fillna("").astype(str).str.strip().eq("")
+        merged.loc[empty_mask, column] = derived.loc[empty_mask, column]
+    merged["theme"] = merged["theme"].replace("", "미분류")
+    merged["rebalance_gap_pct"] = merged["target_weight_pct"] - merged["actual_weight_pct"]
+    merged["action_bucket"] = merged.apply(_portfolio_action_bucket, axis=1)
+    merged["review_priority"] = merged["action_bucket"].map(
+        {
+            "정리 검토": 0,
+            "비중축소 검토": 1,
+            "추가매수 검토": 2,
+            "보유/관찰": 3,
+            "정보 확인": 4,
+            "보유 유지": 5,
+        }
+    ).fillna(9)
+    merged["review_signal"] = merged.apply(_portfolio_review_signal, axis=1)
+    return merged.sort_values(
+        by=["review_priority", "actual_weight_pct", "final_score"],
+        ascending=[True, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
+
+
+def _portfolio_action_bucket(row: pd.Series) -> str:
+    planned = str(row.get("planned_action", "") or "").strip()
+    if planned:
+        return planned
+
+    recommendation_bucket = str(row.get("recommendation_bucket", "") or "")
+    core_bucket = str(row.get("core_bucket", "") or "")
+    stage = str(row.get("stage", "") or "")
+    gap = row.get("rebalance_gap_pct", pd.NA)
+    excluded = bool(row.get("excluded", False))
+
+    if recommendation_bucket == "제외" or excluded:
+        return "정리 검토"
+    if recommendation_bucket == "가치함정 경고" or stage == "과열":
+        return "비중축소 검토"
+    if pd.notna(gap):
+        if gap >= 1.0:
+            return "추가매수 검토"
+        if gap <= -1.0:
+            return "비중축소 검토"
+    if core_bucket in {"Value Core", "Growth Core"} and stage in {"초입", "중간"}:
+        return "추가매수 검토"
+    if recommendation_bucket == "소액 관찰":
+        return "보유/관찰"
+    if recommendation_bucket in {"보류", ""}:
+        return "정보 확인"
+    return "보유 유지"
+
+
+def _portfolio_review_signal(row: pd.Series) -> str:
+    parts: list[str] = []
+    gap = row.get("rebalance_gap_pct", pd.NA)
+    if pd.notna(gap) and abs(float(gap)) >= 1.0:
+        direction = "언더" if float(gap) > 0 else "오버"
+        parts.append(f"목표 대비 {direction}웨이트 {abs(float(gap)):.1f}%p")
+
+    core_bucket = str(row.get("core_bucket", "") or "")
+    recommendation_bucket = str(row.get("recommendation_bucket", "") or "")
+    leader_bucket = str(row.get("leader_bucket", "") or "")
+    stage = str(row.get("stage", "") or "")
+    if leader_bucket == "Leader":
+        parts.append("사이클 선도주")
+    elif leader_bucket == "Leader Candidate":
+        parts.append("리더 후보")
+    elif core_bucket:
+        parts.append(core_bucket)
+    elif recommendation_bucket:
+        parts.append(recommendation_bucket)
+    if stage:
+        parts.append(f"stage {stage}")
+    trend_view = str(row.get("trend_view", "") or "").strip()
+    if trend_view and trend_view not in {"-", ""}:
+        parts.append(trend_view)
+
+    note = str(row.get("notes", "") or "").strip()
+    if note and note != "-":
+        parts.append(note)
+    return " / ".join(parts[:3])
+
+
+def _derive_portfolio_classification(row: pd.Series) -> pd.Series:
+    ticker = str(row.get("ticker", "") or "").strip()
+    name = str(row.get("display_name", row.get("name", "")) or "").strip()
+    market = str(row.get("market", "") or "").strip()
+    stage = str(row.get("stage", "") or "").strip()
+    strategy = str(row.get("strategy", "") or "").strip()
+    theme = str(row.get("theme", "") or "").strip()
+    market_scope = str(row.get("market_scope", "") or "").strip()
+    asset_class = str(row.get("asset_class", "") or "").strip()
+    country = str(row.get("country", "") or "").strip()
+    style_bucket = str(row.get("style_bucket", "") or "").strip()
+    cycle_view = str(row.get("cycle_view", "") or "").strip()
+    trend_view = str(row.get("trend_view", "") or "").strip()
+    conviction = str(row.get("conviction", "") or "").strip()
+    fx_exposure = str(row.get("fx_exposure", "") or "").strip()
+
+    etf_keywords = ("KODEX", "TIGER", "KOACT", "KoAct", "KIWOOM", "ACE", "ARIRANG", "SOL", "TIMEFOLIO")
+    if not market_scope:
+        if any(keyword in name for keyword in etf_keywords):
+            market_scope = "국내"
+        elif market in {"KOSPI", "KOSDAQ"} or ticker.isdigit():
+            market_scope = "국내"
+        else:
+            market_scope = "해외"
+    if not asset_class:
+        asset_class = "ETF" if any(keyword in name for keyword in etf_keywords) else "주식"
+    if not country:
+        if market_scope == "국내":
+            country = "한국"
+        elif ticker in {"AAPL", "NVDA", "GOOGL", "META", "SIRI", "TSM", "C", "NKE"}:
+            country = "미국"
+        else:
+            country = "기타해외"
+    if not fx_exposure:
+        fx_exposure = "높음" if market_scope == "해외" else "낮음"
+    if not trend_view:
+        trend_view = {
+            "초입": "추세 초기",
+            "중간": "추세 진행",
+            "후반": "추세 후반",
+            "과열": "과열 경계",
+        }.get(stage, "추세 확인 필요")
+    if not cycle_view:
+        if str(row.get("leader_bucket", "") or "") == "Leader":
+            cycle_view = "주도"
+        elif str(row.get("leader_bucket", "") or "") == "Leader Candidate":
+            cycle_view = "리더 후보"
+        elif stage in {"초입", "중간"}:
+            cycle_view = "상승 사이클"
+        elif stage == "과열":
+            cycle_view = "과열 구간"
+        else:
+            cycle_view = "중립"
+    if not conviction:
+        actual = _num(row.get("actual_weight_pct", None))
+        conviction = "핵심" if actual >= 4.0 else "중간" if actual >= 2.0 else "위성"
+    if not style_bucket:
+        if asset_class == "ETF":
+            style_bucket = "패시브"
+        elif "배당" in strategy or "금융" in theme:
+            style_bucket = "인컴"
+        elif "Growth" in str(row.get("core_bucket", "") or "") or "엔비디아" in name:
+            style_bucket = "성장"
+        else:
+            style_bucket = "혼합"
+
+    return pd.Series(
+        {
+            "market_scope": market_scope,
+            "asset_class": asset_class,
+            "country": country,
+            "style_bucket": style_bucket,
+            "trend_view": trend_view,
+            "cycle_view": cycle_view,
+            "conviction": conviction,
+            "fx_exposure": fx_exposure,
+        }
+    )
+
+
+def _portfolio_summary(portfolio: pd.DataFrame) -> dict[str, object]:
+    actual_sum = float(portfolio["actual_weight_pct"].dropna().sum()) if "actual_weight_pct" in portfolio.columns else 0.0
+    target_sum = float(portfolio["target_weight_pct"].dropna().sum()) if "target_weight_pct" in portfolio.columns else 0.0
+    themes = portfolio["theme"].fillna("미분류").replace("", "미분류")
+    theme_mix = (
+        portfolio.assign(theme=themes)
+        .groupby("theme", dropna=False)[["actual_weight_pct", "target_weight_pct"]]
+        .sum(min_count=1)
+        .fillna(0.0)
+        .sort_values("actual_weight_pct", ascending=False)
+    )
+    action_counts = portfolio["action_bucket"].value_counts().to_dict()
+    region_mix = _portfolio_dimension_mix(portfolio, "market_scope")
+    asset_mix = _portfolio_dimension_mix(portfolio, "asset_class")
+    trend_mix = _portfolio_dimension_mix(portfolio, "trend_view")
+    top_themes = []
+    for theme, row in theme_mix.head(3).iterrows():
+        top_themes.append(f"{theme} {row['actual_weight_pct']:.1f}%")
+    return {
+        "count": len(portfolio),
+        "theme_count": int(themes.nunique()),
+        "actual_sum": actual_sum,
+        "target_sum": target_sum,
+        "top3_theme_weight": float(theme_mix["actual_weight_pct"].head(3).sum()) if not theme_mix.empty else 0.0,
+        "top_themes": top_themes,
+        "action_counts": action_counts,
+        "theme_table": theme_mix.reset_index(),
+        "region_table": region_mix.reset_index(),
+        "asset_table": asset_mix.reset_index(),
+        "trend_table": trend_mix.reset_index(),
+    }
+
+
+def _portfolio_dimension_mix(portfolio: pd.DataFrame, column: str) -> pd.DataFrame:
+    label_series = portfolio[column].fillna("미분류").replace("", "미분류")
+    return (
+        portfolio.assign(**{column: label_series})
+        .groupby(column, dropna=False)[["actual_weight_pct", "target_weight_pct"]]
+        .sum(min_count=1)
+        .fillna(0.0)
+        .sort_values("actual_weight_pct", ascending=False)
+    )
+
+
+def _portfolio_section_markdown(portfolio: pd.DataFrame | None) -> str:
+    if portfolio is None or portfolio.empty:
+        return ""
+
+    summary = _portfolio_summary(portfolio)
+    action_counts = summary["action_counts"]
+    lines = [
+        "## Portfolio Overlay",
+        f"- 보유 종목: {summary['count']}개",
+        f"- 실제 비중 합계: {summary['actual_sum']:.1f}%",
+        f"- 목표 비중 합계: {summary['target_sum']:.1f}%",
+        f"- 테마 수: {summary['theme_count']}개",
+        f"- 상위 3개 테마 집중도: {summary['top3_theme_weight']:.1f}%",
+    ]
+    if summary["top_themes"]:
+        lines.append(f"- 상위 테마: {', '.join(summary['top_themes'])}")
+    if action_counts:
+        lines.append(
+            "- 액션 버킷: "
+            + ", ".join(f"{label} {count}개" for label, count in action_counts.items())
+        )
+
+    theme_table = summary["theme_table"].copy()
+    theme_table["gap_pct"] = theme_table["target_weight_pct"] - theme_table["actual_weight_pct"]
+    region_table = summary["region_table"].copy()
+    region_table["gap_pct"] = region_table["target_weight_pct"] - region_table["actual_weight_pct"]
+    asset_table = summary["asset_table"].copy()
+    asset_table["gap_pct"] = asset_table["target_weight_pct"] - asset_table["actual_weight_pct"]
+    trend_table = summary["trend_table"].copy()
+    trend_table["gap_pct"] = trend_table["target_weight_pct"] - trend_table["actual_weight_pct"]
+
+    review_columns = [
+        "ticker",
+        "display_name",
+        "market_scope",
+        "asset_class",
+        "theme",
+        "style_bucket",
+        "strategy",
+        "trend_view",
+        "cycle_view",
+        "conviction",
+        "actual_weight_pct",
+        "target_weight_pct",
+        "rebalance_gap_pct",
+        "action_bucket",
+        "core_bucket",
+        "recommendation_bucket",
+        "stage",
+        "review_signal",
+    ]
+    review_table = portfolio[review_columns].head(15).rename(
+        columns={
+            "display_name": "name",
+            "market_scope": "scope",
+            "asset_class": "asset",
+            "actual_weight_pct": "actual_weight_pct",
+            "target_weight_pct": "target_weight_pct",
+            "rebalance_gap_pct": "gap_pct",
+            "action_bucket": "action",
+            "core_bucket": "core",
+            "recommendation_bucket": "screening",
+            "review_signal": "signal",
+        }
+    )
+    lines.extend(
+        [
+            "",
+            "### Theme Mix",
+            theme_table.to_markdown(index=False),
+            "",
+            "### Region Mix",
+            region_table.to_markdown(index=False),
+            "",
+            "### Asset / Trend Mix",
+            asset_table.to_markdown(index=False),
+            "",
+            trend_table.to_markdown(index=False),
+            "",
+            "### Review Queue",
+            review_table.to_markdown(index=False),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _portfolio_section_html(portfolio: pd.DataFrame | None) -> str:
+    if portfolio is None or portfolio.empty:
+        return ""
+
+    summary = _portfolio_summary(portfolio)
+    metric_cards = [
+        ("보유 종목", f"{summary['count']}개"),
+        ("실제 비중 합계", f"{summary['actual_sum']:.1f}%"),
+        ("목표 비중 합계", f"{summary['target_sum']:.1f}%"),
+        ("테마 수", f"{summary['theme_count']}개"),
+        ("상위 3테마 집중도", f"{summary['top3_theme_weight']:.1f}%"),
+        ("추가/축소/정리", f"{summary['action_counts'].get('추가매수 검토', 0)}/{summary['action_counts'].get('비중축소 검토', 0)}/{summary['action_counts'].get('정리 검토', 0)}"),
+    ]
+    cards_html = "".join(
+        f'<div class="metric-card"><span class="metric-label">{escape(label)}</span><strong>{escape(value)}</strong></div>'
+        for label, value in metric_cards
+    )
+    theme_chips = "".join(
+        f'<span class="chip">{escape(label)}</span>' for label in summary["top_themes"]
+    )
+    action_chips = "".join(
+        f'<span class="chip strong">{escape(action)} {count}개</span>'
+        for action, count in summary["action_counts"].items()
+    )
+
+    theme_rows: list[str] = []
+    for row in summary["theme_table"].head(8).itertuples(index=False):
+        gap = (_num(getattr(row, "target_weight_pct", 0)) - _num(getattr(row, "actual_weight_pct", 0)))
+        theme_rows.append(
+            f"""
+            <tr>
+              <td><strong>{escape(str(getattr(row, "theme", "-") or "-"))}</strong></td>
+              <td>{escape(_fmt_cell(getattr(row, "actual_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "target_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(gap))}%p</td>
+            </tr>
+            """
+        )
+
+    region_rows: list[str] = []
+    for row in summary["region_table"].head(6).itertuples(index=False):
+        gap = (_num(getattr(row, "target_weight_pct", 0)) - _num(getattr(row, "actual_weight_pct", 0)))
+        region_rows.append(
+            f"""
+            <tr>
+              <td><strong>{escape(str(getattr(row, "market_scope", "-") or "-"))}</strong></td>
+              <td>{escape(_fmt_cell(getattr(row, "actual_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "target_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(gap))}%p</td>
+            </tr>
+            """
+        )
+
+    asset_rows: list[str] = []
+    for row in summary["asset_table"].head(6).itertuples(index=False):
+        gap = (_num(getattr(row, "target_weight_pct", 0)) - _num(getattr(row, "actual_weight_pct", 0)))
+        asset_rows.append(
+            f"""
+            <tr>
+              <td><strong>{escape(str(getattr(row, "asset_class", "-") or "-"))}</strong></td>
+              <td>{escape(_fmt_cell(getattr(row, "actual_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "target_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(gap))}%p</td>
+            </tr>
+            """
+        )
+
+    trend_rows: list[str] = []
+    for row in summary["trend_table"].head(8).itertuples(index=False):
+        gap = (_num(getattr(row, "target_weight_pct", 0)) - _num(getattr(row, "actual_weight_pct", 0)))
+        trend_rows.append(
+            f"""
+            <tr>
+              <td><strong>{escape(str(getattr(row, "trend_view", "-") or "-"))}</strong></td>
+              <td>{escape(_fmt_cell(getattr(row, "actual_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "target_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(gap))}%p</td>
+            </tr>
+            """
+        )
+
+    review_rows: list[str] = []
+    for row in portfolio.head(12).itertuples(index=False):
+        review_rows.append(
+            f"""
+            <tr>
+              <td><strong>{escape(str(getattr(row, "display_name", "-") or "-"))}</strong><div class="subtle">{escape(str(getattr(row, "ticker", "-") or "-"))}</div></td>
+              <td>{escape(str(getattr(row, "market_scope", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "asset_class", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "theme", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "style_bucket", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "strategy", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "trend_view", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "cycle_view", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "conviction", "-") or "-"))}</td>
+              <td>{escape(_fmt_cell(getattr(row, "actual_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "target_weight_pct", None)))}%</td>
+              <td>{escape(_fmt_cell(getattr(row, "rebalance_gap_pct", None)))}%p</td>
+              <td>{escape(str(getattr(row, "action_bucket", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "core_bucket", "") or getattr(row, "recommendation_bucket", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "stage", "-") or "-"))}</td>
+              <td>{escape(str(getattr(row, "review_signal", "-") or "-"))}</td>
+            </tr>
+            """
+        )
+
+    return f"""
+      <div class="section-head" style="margin-top:4px;">
+        <h2>포트폴리오 오버레이</h2>
+        <span>`data/portfolio_positions.csv`가 있을 때만 보입니다.</span>
+      </div>
+      <div class="metric-grid">{cards_html}</div>
+      <div class="hero-note" style="margin-top:16px;">
+        스크리닝 결과를 내 보유 종목에 다시 덮어서, 무엇을 더 사고 줄이고 정리할지 한 번에 보이도록 정리했습니다.
+      </div>
+      <div class="chip-row" style="margin-top:14px;">{theme_chips}{action_chips}</div>
+      <div class="section-head" style="margin-top:22px;">
+        <h2>테마 비중</h2>
+        <span>실제 비중과 목표 비중 차이</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>테마</th>
+              <th>실제 비중</th>
+              <th>목표 비중</th>
+              <th>갭</th>
+            </tr>
+          </thead>
+          <tbody>{''.join(theme_rows)}</tbody>
+        </table>
+      </div>
+      <div class="section-head" style="margin-top:22px;">
+        <h2>지역 / 자산 분류</h2>
+        <span>국장/해외, 주식/ETF 기준으로 쪼갠 비중</span>
+      </div>
+      <div class="memo-grid">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>지역</th>
+                <th>실제 비중</th>
+                <th>목표 비중</th>
+                <th>갭</th>
+              </tr>
+            </thead>
+            <tbody>{''.join(region_rows)}</tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>자산</th>
+                <th>실제 비중</th>
+                <th>목표 비중</th>
+                <th>갭</th>
+              </tr>
+            </thead>
+            <tbody>{''.join(asset_rows)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="section-head" style="margin-top:22px;">
+        <h2>추세 분류</h2>
+        <span>초기/진행/과열 같은 운영용 추세 뷰</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>추세</th>
+              <th>실제 비중</th>
+              <th>목표 비중</th>
+              <th>갭</th>
+            </tr>
+          </thead>
+          <tbody>{''.join(trend_rows)}</tbody>
+        </table>
+      </div>
+      <div class="section-head" style="margin-top:22px;">
+        <h2>리뷰 큐</h2>
+        <span>비중 조절과 매수 타이밍을 먼저 점검할 종목</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>종목</th>
+              <th>지역</th>
+              <th>자산</th>
+              <th>테마</th>
+              <th>스타일</th>
+              <th>전략</th>
+              <th>추세</th>
+              <th>사이클</th>
+              <th>확신도</th>
+              <th>실제</th>
+              <th>목표</th>
+              <th>갭</th>
+              <th>액션</th>
+              <th>스크리닝</th>
+              <th>Stage</th>
+              <th>시그널</th>
+            </tr>
+          </thead>
+          <tbody>{''.join(review_rows)}</tbody>
+        </table>
+      </div>
+    """
+
+
 def _rank_for_explorer(
     frame: pd.DataFrame,
     score_column: str,
@@ -1546,7 +2341,7 @@ def _card_grid(frame: pd.DataFrame, score_column: str, accent: str) -> str:
             f"""
             <article class="pick-card {accent}">
               <div class="ticker">{escape(str(row.ticker))}</div>
-              <h3>{escape(str(row.name))}</h3>
+              <h3><a class="stock-link" href="#{escape(_detail_anchor(getattr(row, 'ticker', '')))}">{escape(str(row.name))}</a></h3>
               <span class="score-badge {accent}">score {escape(score_text)}</span>
               <div class="meta">
                 <div><strong>업종</strong><br>{escape(_fmt_cell(getattr(row, 'sector', None)))}</div>
@@ -1581,7 +2376,7 @@ def _issue_digest_html(frame: pd.DataFrame) -> str:
             f"""
             <article class="pick-card {accent}">
               <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
-              <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
+              <h3><a class="stock-link" href="#{escape(_detail_anchor(getattr(row, 'ticker', '')))}">{escape(str(getattr(row, 'name', '-')))}</a></h3>
               <span class="score-badge {accent}">{escape(bucket_text)}</span>
               <div class="meta">
                 <div><strong>업종</strong><br>{escape(_fmt_cell(getattr(row, 'sector', None)))}</div>
@@ -1594,6 +2389,183 @@ def _issue_digest_html(frame: pd.DataFrame) -> str:
             """
         )
     return "".join(cards) if cards else "<div class='subtle'>오늘 포착된 중요 이슈가 없습니다.</div>"
+
+
+def _detail_anchor(ticker: object) -> str:
+    return f"detail-{str(ticker or '').strip()}"
+
+
+def _summary_dashboard_html(
+    working: pd.DataFrame,
+    summary: dict[str, int],
+    buy_review: pd.DataFrame,
+    value_core: pd.DataFrame,
+    growth_core: pd.DataFrame,
+    leader_top: pd.DataFrame,
+    leader_candidate: pd.DataFrame,
+    small_watch: pd.DataFrame,
+    trap_watch: pd.DataFrame,
+) -> str:
+    bucket_rows = [
+        ("Value Core", len(value_core), "value"),
+        ("Growth Core", len(growth_core), "growth"),
+        ("Cycle Leader", len(leader_top), "growth"),
+        ("Leader Candidate", len(leader_candidate), "growth"),
+        ("소액 관찰", len(small_watch), "growth"),
+        ("가치함정 경고", len(trap_watch), "danger"),
+    ]
+    bucket_total = max(1, max(count for _, count, _ in bucket_rows))
+    bucket_bars = "".join(
+        f"""
+        <div class="bar-row">
+          <span>{escape(label)}</span>
+          <div class="bar-track"><div class="bar-fill {tone}" style="width:{(count / bucket_total) * 100:.1f}%"></div></div>
+          <strong>{count}</strong>
+        </div>
+        """
+        for label, count, tone in bucket_rows
+    )
+
+    stage_series = (
+        working["stage"].fillna("").astype(str).value_counts()
+        if "stage" in working.columns
+        else pd.Series(dtype=int)
+    )
+    stage_order = ["초입", "중간", "후반", "과열"]
+    stage_total = max(1, int(stage_series.max()) if not stage_series.empty else 1)
+    stage_bars = "".join(
+        f"""
+        <div class="bar-row">
+          <span>{escape(stage)}</span>
+          <div class="bar-track"><div class="bar-fill {'danger' if stage == '과열' else 'growth' if stage == '후반' else 'value'}" style="width:{(int(stage_series.get(stage, 0)) / stage_total) * 100:.1f}%"></div></div>
+          <strong>{int(stage_series.get(stage, 0))}</strong>
+        </div>
+        """
+        for stage in stage_order
+    )
+
+    actionable = working[
+        working["recommendation_bucket"].fillna("").isin(["실매수 검토", "소액 관찰", "가치함정 경고"])
+        | working["core_bucket"].fillna("").isin(["Value Core", "Growth Core"])
+        | working["leader_bucket"].fillna("").isin(["Leader", "Leader Candidate"])
+    ].copy()
+    sector_table_html = "<tr><td colspan='3' class='subtle'>No actionable sectors</td></tr>"
+    if not actionable.empty:
+        sector_counts = (
+            actionable.assign(sector=actionable["sector"].fillna("").replace("", "미분류"))
+            .groupby("sector", dropna=False)
+            .agg(
+                candidates=("ticker", "count"),
+                avg_score=("final_score", "mean"),
+                core_count=("core_bucket", lambda s: int(s.fillna("").isin(["Value Core", "Growth Core"]).sum())),
+            )
+            .sort_values(["candidates", "avg_score"], ascending=False)
+            .head(6)
+            .reset_index()
+        )
+        sector_table_html = "".join(
+            f"<tr><td>{escape(str(row.sector))}</td><td>{int(row.candidates)}</td><td>{float(row.avg_score):.1f}</td></tr>"
+            for row in sector_counts.itertuples(index=False)
+        )
+
+    health_rows = [
+        ("실매수 검토", summary["buy_review"]),
+        ("핵심 데이터 부족", summary["core_missing"]),
+        ("급등 제외", summary["excluded"]),
+        ("캐시 보강", summary["cache_rows"]),
+    ]
+    health_table_html = "".join(
+        f"<tr><td>{escape(label)}</td><td>{count:,}</td></tr>" for label, count in health_rows
+    )
+
+    return f"""
+    <div class="dashboard-grid">
+      <div class="dashboard-panel">
+        <h3>행동 버킷 분포</h3>
+        <div class="bar-list">{bucket_bars}</div>
+      </div>
+      <div class="dashboard-panel">
+        <h3>Stage 분포</h3>
+        <div class="bar-list">{stage_bars}</div>
+      </div>
+      <div class="dashboard-panel">
+        <h3>Actionable 업종 상위</h3>
+        <table class="mini-table">
+          <thead><tr><th>업종</th><th>후보수</th><th>평균점수</th></tr></thead>
+          <tbody>{sector_table_html}</tbody>
+        </table>
+      </div>
+      <div class="dashboard-panel">
+        <h3>운영 체크</h3>
+        <table class="mini-table">
+          <thead><tr><th>항목</th><th>수</th></tr></thead>
+          <tbody>{health_table_html}</tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+
+def _build_detail_focus_rows(
+    value_core: pd.DataFrame,
+    growth_core: pd.DataFrame,
+    leader_top: pd.DataFrame,
+    leader_candidate: pd.DataFrame,
+    small_watch: pd.DataFrame,
+    trap_watch: pd.DataFrame,
+) -> pd.DataFrame:
+    ordered = pd.concat(
+        [
+            value_core.head(4),
+            growth_core.head(3),
+            leader_top.head(3),
+            leader_candidate.head(3),
+            small_watch.head(2),
+            trap_watch.head(2),
+        ],
+        ignore_index=True,
+    )
+    if ordered.empty:
+        return ordered
+    return ordered.drop_duplicates(subset=["ticker"], keep="first").head(12)
+
+
+def _detail_deck_html(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "<div class='subtle'>상세 카드로 내릴 종목이 아직 없습니다.</div>"
+    cards: list[str] = []
+    for row in frame.itertuples(index=False):
+        reasons = _recommendation_reasons(row)
+        issue_text = _issue_summary(row)
+        cards.append(
+            f"""
+            <article class="detail-card" id="{escape(_detail_anchor(getattr(row, 'ticker', '')))}">
+              <div class="detail-head">
+                <div>
+                  <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
+                  <h3 style="margin:4px 0 0;">{escape(str(getattr(row, 'name', '-')))}</h3>
+                </div>
+                <div class="chip-row">
+                  <span class="score-badge {'value' if str(getattr(row, 'core_bucket', '') or '').startswith('Value') else 'growth'}">{escape(_bucket_label(row))}</span>
+                  <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
+                </div>
+              </div>
+              <div class="detail-facts">
+                <div>최종점수<strong>{escape(_fmt_cell(getattr(row, 'final_score', None)))}</strong></div>
+                <div>PER / PBR<strong>{escape(_fmt_cell(getattr(row, 'per', None)))}/{escape(_fmt_cell(getattr(row, 'pbr', None)))}</strong></div>
+                <div>6M 수익률<strong>{escape(_fmt_cell(getattr(row, 'returns_6m_pct', None)))}%</strong></div>
+                <div>EPS Revision<strong>{escape(_fmt_cell(getattr(row, 'estimate_revision_score', None)))}</strong></div>
+                <div>TAM Expansion<strong>{escape(_fmt_cell(getattr(row, 'tam_expansion_score', None)))}</strong></div>
+                <div>Ownership<strong>{escape(_fmt_cell(getattr(row, 'ownership_flow_score', None)))}</strong></div>
+              </div>
+              <div class="memo-summary" style="margin-top:14px;">{escape(_memo_caution(row))}</div>
+              <div class="memo-summary">{escape(_bucket_metric_line(row))}</div>
+              {f'<div class="issue-line"><strong>이슈</strong> {escape(issue_text)}</div>' if issue_text else ''}
+              <ol class="reason-list">{''.join(f'<li>{escape(reason)}</li>' for reason in reasons[:4])}</ol>
+            </article>
+            """
+        )
+    return "".join(cards)
 
 
 def _conviction_grid(frame: pd.DataFrame) -> str:
@@ -1641,7 +2613,7 @@ def _memo_grid(frame: pd.DataFrame, title: str, tone: str) -> str:
             f"""
             <article class="memo-card">
               <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))}</div>
-              <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
+              <h3><a class="stock-link" href="#{escape(_detail_anchor(getattr(row, 'ticker', '')))}">{escape(str(getattr(row, 'name', '-')))}</a></h3>
               <div class="chip-row">
                 <span class="score-badge {'value' if tone == 'value' else 'growth'}">{escape(bucket_text)}</span>
                 <span class="chip">{escape(str(getattr(row, 'stage', '-') or '-'))}</span>
@@ -1689,7 +2661,7 @@ def _spotlight_strip(value_frame: pd.DataFrame, growth_frame: pd.DataFrame, lead
             f"""
             <article class="spotlight-card {accent}">
               <span class="spotlight-label">{escape(label)}</span>
-              <h3>{escape(str(getattr(row, 'name', '-')))}</h3>
+              <h3><a class="stock-link" href="#{escape(_detail_anchor(getattr(row, 'ticker', '')))}">{escape(str(getattr(row, 'name', '-')))}</a></h3>
               <div class="ticker">{escape(str(getattr(row, 'ticker', '-')))} · {escape(str(getattr(row, 'sector', '-') or '-'))}</div>
               <div class="chip-row">
                 <span class="score-badge {accent}">score {escape(_fmt_cell(getattr(row, score_column, None)))}</span>
@@ -1908,6 +2880,9 @@ def _html_table(frame: pd.DataFrame, bucket: str) -> str:
             key = columns[idx]
             if key == "stage":
                 rendered.append(f"<td><span class='stage stage-{escape(str(cell or '초입'))}'>{escape(str(cell or '-'))}</span></td>")
+            elif key == "name":
+                ticker = row[0] if row else ""
+                rendered.append(f"<td><a class='stock-link' href='#{escape(_detail_anchor(ticker))}'>{escape(_fmt_cell(cell, key))}</a></td>")
             else:
                 rendered.append(f"<td>{escape(_fmt_cell(cell, key))}</td>")
         rows.append("<tr>" + "".join(rendered) + "</tr>")
