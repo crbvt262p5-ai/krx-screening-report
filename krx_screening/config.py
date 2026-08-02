@@ -22,6 +22,7 @@ class Settings:
     news_candidate_limit: int
     request_timeout: int
     dart_max_concurrent: int
+    portfolio_overlay_enabled: bool
 
     @classmethod
     def load(cls) -> "Settings":
@@ -41,6 +42,7 @@ class Settings:
             news_candidate_limit=int(os.getenv("KRX_NEWS_CANDIDATE_LIMIT", "80")),
             request_timeout=int(os.getenv("KRX_REQUEST_TIMEOUT", "15")),
             dart_max_concurrent=int(os.getenv("KRX_DART_MAX_CONCURRENT", "2")),
+            portfolio_overlay_enabled=os.getenv("KRX_ENABLE_PORTFOLIO_OVERLAY", "0").strip().lower() in {"1", "true", "yes", "on"},
         )
 
     def ensure_directories(self) -> None:

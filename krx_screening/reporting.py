@@ -1631,6 +1631,9 @@ def _load_recent_top_counts(settings: Settings, trading_date: date) -> dict[str,
 
 
 def _load_portfolio_frame(settings: Settings, working: pd.DataFrame) -> pd.DataFrame | None:
+    if not settings.portfolio_overlay_enabled:
+        return None
+
     path = settings.data_dir / "portfolio_positions.csv"
     if not path.exists():
         return None
