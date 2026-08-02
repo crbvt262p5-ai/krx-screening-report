@@ -544,6 +544,35 @@ def _build_html(
       gap: 8px;
       margin-bottom: 16px;
     }}
+    .subtab-nav {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }}
+    .subtab-button {{
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.68);
+      color: var(--muted);
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .subtab-button.active {{
+      background: rgba(28,26,24,0.92);
+      color: #fff;
+      border-color: rgba(28,26,24,0.92);
+    }}
+    .subtab-panel {{
+      display: none;
+    }}
+    .subtab-panel.active {{
+      display: block;
+    }}
     .section {{
       margin-top: 20px;
       background: var(--panel);
@@ -1015,24 +1044,34 @@ def _build_html(
       </div>
       <div class="metric-grid">{summary_html}</div>
     </section>
-    <div class="tab-panels">
+      <div class="tab-panels">
       <div class="tab-panel active" id="tab-main" data-tab-panel="main">
-        <div class="section-stack">
-          <section class="section" id="summary-dashboard">
+        <section class="section">
+          <div class="section-head">
+            <h2>메인 뷰</h2>
+            <span>오늘 결론을 네 개 시야로 나눠서 봅니다.</span>
+          </div>
+          <div class="subtab-nav" data-subtab-nav="main">
+            <button class="subtab-button active" type="button" data-subtab-group="main" data-subtab="dashboard">요약 보드</button>
+            <button class="subtab-button" type="button" data-subtab-group="main" data-subtab="spotlight">대표 축</button>
+            <button class="subtab-button" type="button" data-subtab-group="main" data-subtab="memo">행동 메모</button>
+            <button class="subtab-button" type="button" data-subtab-group="main" data-subtab="conviction">컨빅션</button>
+          </div>
+          <div class="subtab-panel active" data-subtab-panel="main" data-subtab-name="dashboard" id="summary-dashboard">
             <div class="section-head">
               <h2>한눈에 보기</h2>
               <span>오늘 무엇을 먼저 읽어야 하는지 메인 흐름만 남겼습니다.</span>
             </div>
             {dashboard_html}
-          </section>
-          <section class="section">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="main" data-subtab-name="spotlight">
             <div class="section-head">
               <h2>오늘의 대표 축</h2>
               <span>주도주, 재평가 후보, 핵심 매수축을 먼저 봅니다.</span>
             </div>
             <div class="card-grid">{spotlight_html}</div>
-          </section>
-          <section class="section">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="main" data-subtab-name="memo">
             <div class="section-head">
               <h2>오늘의 메모</h2>
               <span>실제 행동 기준으로 네 그룹만 읽으면 됩니다.</span>
@@ -1044,42 +1083,42 @@ def _build_html(
               {memo_watch_html}
               {memo_trap_html}
             </div>
-          </section>
-          <section class="section">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="main" data-subtab-name="conviction">
             <div class="section-head">
               <h2>컨빅션 노트</h2>
               <span>왜 상단에 남았는지 점수축과 추천 이유를 같이 보여줍니다.</span>
             </div>
             <div class="card-grid">{conviction_html}</div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
       <div class="tab-panel" id="tab-keywords" data-tab-panel="keywords">
-        <div class="section-stack">
-          <section class="section">
-            <div class="section-head">
-              <h2>키워드 탐색</h2>
-              <span>정의, 이슈, 렌즈, 표를 주제별로 파고드는 탭입니다.</span>
-            </div>
-            <div class="keyword-nav">
-              <a class="jump-link" href="#keyword-definitions">분류 정의</a>
-              <a class="jump-link" href="#keyword-issues">중요 이슈</a>
-              <a class="jump-link" href="#keyword-lenses">렌즈 카드</a>
-              <a class="jump-link" href="#keyword-tables">핵심 표</a>
-              <a class="jump-link" href="#keyword-health">운영 상태</a>
-            </div>
-            <div id="keyword-definitions" class="definition-grid">
+        <section class="section">
+          <div class="section-head">
+            <h2>키워드 탐색</h2>
+            <span>정의, 이슈, 렌즈, 표를 분리해서 바로 들어갑니다.</span>
+          </div>
+          <div class="subtab-nav" data-subtab-nav="keywords">
+            <button class="subtab-button active" type="button" data-subtab-group="keywords" data-subtab="definitions">분류 정의</button>
+            <button class="subtab-button" type="button" data-subtab-group="keywords" data-subtab="issues">중요 이슈</button>
+            <button class="subtab-button" type="button" data-subtab-group="keywords" data-subtab="lenses">렌즈 카드</button>
+            <button class="subtab-button" type="button" data-subtab-group="keywords" data-subtab="tables">핵심 표</button>
+            <button class="subtab-button" type="button" data-subtab-group="keywords" data-subtab="health">운영 상태</button>
+          </div>
+          <div class="subtab-panel active" data-subtab-panel="keywords" data-subtab-name="definitions" id="keyword-definitions">
+            <div class="definition-grid">
               {definitions_html}
             </div>
-          </section>
-          <section class="section" id="keyword-issues">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="keywords" data-subtab-name="issues" id="keyword-issues">
             <div class="section-head">
               <h2>오늘의 중요 이슈</h2>
               <span>뉴스와 공시에서 종목명 기준으로 걸러낸 핵심 변화입니다.</span>
             </div>
             <div class="card-grid">{issue_focus_html}</div>
-          </section>
-          <section class="section" id="keyword-lenses">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="keywords" data-subtab-name="lenses" id="keyword-lenses">
             <div class="section-head">
               <h2>렌즈 카드</h2>
               <span>같은 종목군을 다른 프레임으로 다시 읽습니다.</span>
@@ -1100,8 +1139,8 @@ def _build_html(
               <span>스타일별로 다시 압축했습니다.</span>
             </div>
             <div class="card-grid">{deep_value_html}{dividend_compounder_html}{turnaround_value_html}{growth_proven_html}{growth_speculative_html}{missed_leader_html}{quick_watch}{trap_watch_html}</div>
-          </section>
-          <section class="section" id="keyword-tables">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="keywords" data-subtab-name="tables" id="keyword-tables">
             <div class="section-head">
               <h2>핵심 표</h2>
               <span>숫자로 직접 비교할 때 보는 표입니다.</span>
@@ -1121,19 +1160,27 @@ def _build_html(
               <span>최근 배당 착시 가능성이 있는 종목입니다.</span>
             </div>
             <div class="table-wrap">{special_watch_html}</div>
-          </section>
-          <section class="section" id="keyword-health">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="keywords" data-subtab-name="health" id="keyword-health">
             <div class="section-head">
               <h2>운영 상태</h2>
               <span>가장 많이 비는 항목과 시스템 상태를 봅니다.</span>
             </div>
             <div class="chip-row">{missing_html}</div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
       <div class="tab-panel" id="tab-detail" data-tab-panel="detail">
-        <div class="section-stack">
-          <section class="section">
+        <section class="section">
+          <div class="section-head">
+            <h2>상세 뷰</h2>
+            <span>탐색과 종목 상세를 분리해 한 번에 한 작업만 하게 했습니다.</span>
+          </div>
+          <div class="subtab-nav" data-subtab-nav="detail">
+            <button class="subtab-button active" type="button" data-subtab-group="detail" data-subtab="explorer">탐색기</button>
+            <button class="subtab-button" type="button" data-subtab-group="detail" data-subtab="cards">상세 카드</button>
+          </div>
+          <div class="subtab-panel active" data-subtab-panel="detail" data-subtab-name="explorer">
             <div class="section-head">
               <h2 id="candidate-explorer">Candidate Explorer</h2>
               <span>상위 200개 비제외 종목을 검색하고 상세 카드로 이동합니다.</span>
@@ -1195,15 +1242,15 @@ def _build_html(
                 <tbody id="universeBody"></tbody>
               </table>
             </div>
-          </section>
-          <section class="section">
+          </div>
+          <div class="subtab-panel" data-subtab-panel="detail" data-subtab-name="cards">
             <div class="section-head">
               <h2 id="detail-deck">종목 상세 카드</h2>
               <span>메인과 키워드 탭에서 고른 종목을 여기서 자세히 읽습니다.</span>
             </div>
             <div class="detail-grid">{detail_deck_html}</div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -1216,6 +1263,8 @@ def _build_html(
     const stageFilter = document.getElementById("stageFilter");
     const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
     const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+    const subtabButtons = Array.from(document.querySelectorAll("[data-subtab-group]"));
+    const subtabPanels = Array.from(document.querySelectorAll("[data-subtab-panel]"));
 
     function activateTab(tabName, updateHash = false) {{
       tabButtons.forEach((button) => {{
@@ -1232,6 +1281,21 @@ def _build_html(
           history.replaceState(null, "", `#${{targetHash}}`);
         }}
       }}
+    }}
+
+    function activateSubtab(groupName, subtabName) {{
+      subtabButtons.forEach((button) => {{
+        const active = button.dataset.subtabGroup === groupName && button.dataset.subtab === subtabName;
+        if (button.dataset.subtabGroup === groupName) {{
+          button.classList.toggle("active", active);
+        }}
+      }});
+      subtabPanels.forEach((panel) => {{
+        const active = panel.dataset.subtabPanel === groupName && panel.dataset.subtabName === subtabName;
+        if (panel.dataset.subtabPanel === groupName) {{
+          panel.classList.toggle("active", active);
+        }}
+      }});
     }}
 
     function tabForHash(hash) {{
@@ -1321,10 +1385,31 @@ def _build_html(
         if (tabName) activateTab(tabName, false);
       }});
     }});
+    subtabButtons.forEach((button) => {{
+      button.addEventListener("click", () => {{
+        activateSubtab(button.dataset.subtabGroup, button.dataset.subtab);
+      }});
+    }});
     window.addEventListener("hashchange", () => {{
       activateTab(tabForHash(window.location.hash), false);
+      if (window.location.hash === "#candidate-explorer") activateSubtab("detail", "explorer");
+      if (window.location.hash === "#detail-deck" || window.location.hash.startsWith("#detail-")) activateSubtab("detail", "cards");
+      if (window.location.hash.startsWith("#keyword-definitions")) activateSubtab("keywords", "definitions");
+      if (window.location.hash.startsWith("#keyword-issues")) activateSubtab("keywords", "issues");
+      if (window.location.hash.startsWith("#keyword-lenses")) activateSubtab("keywords", "lenses");
+      if (window.location.hash.startsWith("#keyword-tables")) activateSubtab("keywords", "tables");
+      if (window.location.hash.startsWith("#keyword-health")) activateSubtab("keywords", "health");
     }});
     activateTab(tabForHash(window.location.hash), false);
+    activateSubtab("main", "dashboard");
+    activateSubtab("keywords", "definitions");
+    activateSubtab("detail", "explorer");
+    if (window.location.hash === "#candidate-explorer") activateSubtab("detail", "explorer");
+    if (window.location.hash === "#detail-deck" || window.location.hash.startsWith("#detail-")) activateSubtab("detail", "cards");
+    if (window.location.hash.startsWith("#keyword-issues")) activateSubtab("keywords", "issues");
+    if (window.location.hash.startsWith("#keyword-lenses")) activateSubtab("keywords", "lenses");
+    if (window.location.hash.startsWith("#keyword-tables")) activateSubtab("keywords", "tables");
+    if (window.location.hash.startsWith("#keyword-health")) activateSubtab("keywords", "health");
     renderUniverse();
   </script>
 </body>
