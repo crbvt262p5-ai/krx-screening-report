@@ -501,6 +501,49 @@ def _build_html(
       font-size: 13px;
       font-weight: 600;
     }}
+    .tab-nav {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }}
+    .tab-button {{
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.74);
+      color: var(--muted);
+      padding: 10px 16px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .tab-button.active {{
+      background: linear-gradient(135deg, rgba(15,118,110,0.12), rgba(255,255,255,0.95));
+      color: var(--text);
+      border-color: rgba(15,118,110,0.22);
+      box-shadow: inset 0 0 0 1px rgba(15,118,110,0.10);
+    }}
+    .tab-panels {{
+      margin-top: 20px;
+    }}
+    .tab-panel {{
+      display: none;
+    }}
+    .tab-panel.active {{
+      display: block;
+    }}
+    .section-stack {{
+      display: grid;
+      gap: 20px;
+    }}
+    .keyword-nav {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }}
     .section {{
       margin-top: 20px;
       background: var(--panel);
@@ -958,175 +1001,211 @@ def _build_html(
           <p>오늘의 결론만 먼저 보이도록 정리했습니다. 상단은 실제 투자 행동 기준으로 묶고, 세부 표와 렌즈는 아래로 접었습니다.</p>
           <div class="hero-note">먼저 `Cycle Leader`와 `Leader Candidate`를 보고, 그 다음 `Value Core`와 `Growth Core`를 확인하면 됩니다. 점수보다 이번 사이클에서 누가 실제로 앞서가는지 먼저 읽는 구조입니다.</div>
           <div class="jump-row">
-            <a class="jump-link" href="#summary-dashboard">요약 보드</a>
-            <a class="jump-link" href="#today-memo">오늘의 메모</a>
-            <a class="jump-link" href="#detail-deck">종목 상세</a>
-            <a class="jump-link" href="#candidate-explorer">탐색기</a>
+            <a class="jump-link" href="#tab-main" data-tab-link="main">메인 읽기</a>
+            <a class="jump-link" href="#tab-keywords" data-tab-link="keywords">키워드 파고들기</a>
+            <a class="jump-link" href="#tab-detail" data-tab-link="detail">상세 보기</a>
+            <a class="jump-link" href="#candidate-explorer" data-tab-link="detail">탐색기 열기</a>
+          </div>
+          <div class="tab-nav" role="tablist" aria-label="리포트 탭">
+            <button class="tab-button active" type="button" data-tab="main" role="tab" aria-selected="true">메인</button>
+            <button class="tab-button" type="button" data-tab="keywords" role="tab" aria-selected="false">키워드</button>
+            <button class="tab-button" type="button" data-tab="detail" role="tab" aria-selected="false">상세</button>
           </div>
         </div>
       </div>
       <div class="metric-grid">{summary_html}</div>
     </section>
-    <section class="section" id="summary-dashboard">
-      <div class="section-head">
-        <h2>한눈에 보기</h2>
-        <span>분포와 핵심 표를 먼저 보고 상세 카드로 내려갑니다.</span>
-      </div>
-      {dashboard_html}
-    </section>
-    <section class="section" id="today-memo">
-      <div class="section-head">
-        <h2>오늘의 메모</h2>
-        <span>실제 행동 기준으로만 네 그룹을 나눴습니다.</span>
-      </div>
-      {portfolio_html}
-      <div class="definition-grid">
-        {definitions_html}
-      </div>
-      <div class="memo-grid">
-        {memo_value_core_html}
-        {memo_growth_core_html}
-        {memo_watch_html}
-        {memo_trap_html}
-      </div>
-      <div class="section-head" style="margin-top:22px;">
-        <h2>오늘의 중요 이슈</h2>
-        <span>뉴스와 공시에서 실제 종목명 기준으로 걸러낸 핵심 변화</span>
-      </div>
-      <div class="card-grid">{issue_focus_html}</div>
-      <details class="fold">
-        <summary>세부 데이터와 렌즈 더 보기</summary>
-        <div class="fold-body">
-          <div class="section-head">
-            <h2>운영 상태</h2>
-            <span>가장 많이 비는 항목과 운영 상태</span>
-          </div>
-          <div class="chip-row">{missing_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Core 카드</h2>
-            <span>유동성 10억 기준과 반복성, 현금창출 질을 통과한 실매수 후보</span>
-          </div>
-          <div class="card-grid">{quick_review}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>소액 관찰 카드</h2>
-            <span>논리는 있으나 유동성이나 구조상 비중을 크게 싣기 어려운 후보</span>
-          </div>
-          <div class="card-grid">{quick_watch}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Cycle Leader 카드</h2>
-            <span>이번 사이클에서 실제로 앞서가는 업종/종목 리더</span>
-          </div>
-          <div class="card-grid">{quick_leader}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Leader Candidate 카드</h2>
-            <span>정배열과 수급, 업종 상대강도가 붙으며 리더로 진입 중인 후보</span>
-          </div>
-          <div class="card-grid">{quick_leader_candidate}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>가치함정 경고 카드</h2>
-            <span>싸 보여도 구조적 할인일 수 있는 후보</span>
-          </div>
-          <div class="card-grid">{trap_watch_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Missed Leader Detector</h2>
-            <span>아직 덜 알려진 재평가 후보</span>
-          </div>
-          <div class="card-grid">{missed_leader_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Growth Proven</h2>
-            <span>체급, 유동성, 실적 체력을 함께 통과한 성장주</span>
-          </div>
-          <div class="card-grid">{growth_proven_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Growth Speculative</h2>
-            <span>테마·초기 모멘텀은 있으나 아직 검증이 더 필요한 후보</span>
-          </div>
-          <div class="card-grid">{growth_speculative_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Top Value 20</h2>
-            <span>압축한 표</span>
-          </div>
-          <div class="table-wrap">{value_table}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Top Growth 20</h2>
-            <span>과열 여부와 52주 위치를 함께 표시</span>
-          </div>
-          <div class="table-wrap">{growth_table}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Special Dividend Watch</h2>
-            <span>최근 실제 배당이 높아 보여도 평년 배당력은 낮을 수 있는 종목</span>
-          </div>
-          <div class="table-wrap">{special_watch_html}</div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2>Candidate Explorer</h2>
-            <span>상위 200개 비제외 종목 검색/필터</span>
-          </div>
-          <div id="candidate-explorer"></div>
-          <div class="explorer-summary">
-            <span class="chip strong">탐색 대상 {len(full_list):,}개</span>
-            <span class="chip">정렬 기준 최종점수</span>
-            <span class="chip">기본값은 실매수·관찰·경고만 표시</span>
-          </div>
-          <div class="controls">
-            <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
-            <select id="bucketFilter">
-              <option value="actionable">Core·관찰·경고</option>
-              <option value="value_core">Value Core만</option>
-              <option value="growth_core">Growth Core만</option>
-              <option value="watch">소액 관찰만</option>
-              <option value="trap">가치함정 경고만</option>
-              <option value="all">전체 보기</option>
-            </select>
-            <select id="marketFilter">
-              <option value="">시장 전체</option>
-              <option value="KOSPI">KOSPI</option>
-              <option value="KOSDAQ">KOSDAQ</option>
-            </select>
-            <select id="stageFilter">
-              <option value="">단계 전체</option>
-              <option value="초입">초입</option>
-              <option value="중간">중간</option>
-              <option value="후반">후반</option>
-              <option value="과열">과열</option>
-            </select>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>종목</th>
-                  <th>시장</th>
-                  <th>업종</th>
-                  <th>시총구간</th>
-                  <th>전일 종가</th>
-                  <th>PER</th>
-                  <th>PBR</th>
-                  <th>배당 T</th>
-                  <th>배당 N</th>
-                  <th>6M</th>
-                  <th>Value</th>
-                  <th>Value Style</th>
-                  <th>Growth</th>
-                  <th>Growth Style</th>
-                  <th>Leader</th>
-                  <th>Core</th>
-                  <th>최근반복</th>
-                  <th>Stage</th>
-                  <th>태그</th>
-                  <th>결측</th>
-                </tr>
-              </thead>
-              <tbody id="universeBody"></tbody>
-            </table>
-          </div>
-          <div class="section-head" style="margin-top:22px;">
-            <h2 id="detail-deck">종목 상세 카드</h2>
-            <span>상단 카드와 탐색기에서 누르면 이 상세 카드로 내려옵니다.</span>
-          </div>
-          <div class="detail-grid">{detail_deck_html}</div>
+    <div class="tab-panels">
+      <div class="tab-panel active" id="tab-main" data-tab-panel="main">
+        <div class="section-stack">
+          <section class="section" id="summary-dashboard">
+            <div class="section-head">
+              <h2>한눈에 보기</h2>
+              <span>오늘 무엇을 먼저 읽어야 하는지 메인 흐름만 남겼습니다.</span>
+            </div>
+            {dashboard_html}
+          </section>
+          <section class="section">
+            <div class="section-head">
+              <h2>오늘의 대표 축</h2>
+              <span>주도주, 재평가 후보, 핵심 매수축을 먼저 봅니다.</span>
+            </div>
+            <div class="card-grid">{spotlight_html}</div>
+          </section>
+          <section class="section">
+            <div class="section-head">
+              <h2>오늘의 메모</h2>
+              <span>실제 행동 기준으로 네 그룹만 읽으면 됩니다.</span>
+            </div>
+            {portfolio_html}
+            <div class="memo-grid">
+              {memo_value_core_html}
+              {memo_growth_core_html}
+              {memo_watch_html}
+              {memo_trap_html}
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head">
+              <h2>컨빅션 노트</h2>
+              <span>왜 상단에 남았는지 점수축과 추천 이유를 같이 보여줍니다.</span>
+            </div>
+            <div class="card-grid">{conviction_html}</div>
+          </section>
         </div>
-      </details>
-    </section>
+      </div>
+      <div class="tab-panel" id="tab-keywords" data-tab-panel="keywords">
+        <div class="section-stack">
+          <section class="section">
+            <div class="section-head">
+              <h2>키워드 탐색</h2>
+              <span>정의, 이슈, 렌즈, 표를 주제별로 파고드는 탭입니다.</span>
+            </div>
+            <div class="keyword-nav">
+              <a class="jump-link" href="#keyword-definitions">분류 정의</a>
+              <a class="jump-link" href="#keyword-issues">중요 이슈</a>
+              <a class="jump-link" href="#keyword-lenses">렌즈 카드</a>
+              <a class="jump-link" href="#keyword-tables">핵심 표</a>
+              <a class="jump-link" href="#keyword-health">운영 상태</a>
+            </div>
+            <div id="keyword-definitions" class="definition-grid">
+              {definitions_html}
+            </div>
+          </section>
+          <section class="section" id="keyword-issues">
+            <div class="section-head">
+              <h2>오늘의 중요 이슈</h2>
+              <span>뉴스와 공시에서 종목명 기준으로 걸러낸 핵심 변화입니다.</span>
+            </div>
+            <div class="card-grid">{issue_focus_html}</div>
+          </section>
+          <section class="section" id="keyword-lenses">
+            <div class="section-head">
+              <h2>렌즈 카드</h2>
+              <span>같은 종목군을 다른 프레임으로 다시 읽습니다.</span>
+            </div>
+            <div class="section-head" style="margin-top:6px;">
+              <h2>Core 카드</h2>
+              <span>실매수 후보와 리더 축을 먼저 정리했습니다.</span>
+            </div>
+            <div class="card-grid">{quick_review}</div>
+            <div class="section-head" style="margin-top:22px;">
+              <h2>Cycle Leader / Candidate</h2>
+              <span>이번 사이클의 실제 리더와 진입 후보입니다.</span>
+            </div>
+            <div class="card-grid">{quick_leader}</div>
+            <div class="card-grid" style="margin-top:14px;">{quick_leader_candidate}</div>
+            <div class="section-head" style="margin-top:22px;">
+              <h2>Value / Growth Lenses</h2>
+              <span>스타일별로 다시 압축했습니다.</span>
+            </div>
+            <div class="card-grid">{deep_value_html}{dividend_compounder_html}{turnaround_value_html}{growth_proven_html}{growth_speculative_html}{missed_leader_html}{quick_watch}{trap_watch_html}</div>
+          </section>
+          <section class="section" id="keyword-tables">
+            <div class="section-head">
+              <h2>핵심 표</h2>
+              <span>숫자로 직접 비교할 때 보는 표입니다.</span>
+            </div>
+            <div class="section-head" style="margin-top:6px;">
+              <h2>Top Value 20</h2>
+              <span>압축한 가치주 표</span>
+            </div>
+            <div class="table-wrap">{value_table}</div>
+            <div class="section-head" style="margin-top:22px;">
+              <h2>Top Growth 20</h2>
+              <span>과열 여부와 52주 위치를 함께 봅니다.</span>
+            </div>
+            <div class="table-wrap">{growth_table}</div>
+            <div class="section-head" style="margin-top:22px;">
+              <h2>Special Dividend Watch</h2>
+              <span>최근 배당 착시 가능성이 있는 종목입니다.</span>
+            </div>
+            <div class="table-wrap">{special_watch_html}</div>
+          </section>
+          <section class="section" id="keyword-health">
+            <div class="section-head">
+              <h2>운영 상태</h2>
+              <span>가장 많이 비는 항목과 시스템 상태를 봅니다.</span>
+            </div>
+            <div class="chip-row">{missing_html}</div>
+          </section>
+        </div>
+      </div>
+      <div class="tab-panel" id="tab-detail" data-tab-panel="detail">
+        <div class="section-stack">
+          <section class="section">
+            <div class="section-head">
+              <h2 id="candidate-explorer">Candidate Explorer</h2>
+              <span>상위 200개 비제외 종목을 검색하고 상세 카드로 이동합니다.</span>
+            </div>
+            <div class="explorer-summary">
+              <span class="chip strong">탐색 대상 {len(full_list):,}개</span>
+              <span class="chip">정렬 기준 최종점수</span>
+              <span class="chip">기본값은 실매수·관찰·경고만 표시</span>
+            </div>
+            <div class="controls">
+              <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
+              <select id="bucketFilter">
+                <option value="actionable">Core·관찰·경고</option>
+                <option value="value_core">Value Core만</option>
+                <option value="growth_core">Growth Core만</option>
+                <option value="watch">소액 관찰만</option>
+                <option value="trap">가치함정 경고만</option>
+                <option value="all">전체 보기</option>
+              </select>
+              <select id="marketFilter">
+                <option value="">시장 전체</option>
+                <option value="KOSPI">KOSPI</option>
+                <option value="KOSDAQ">KOSDAQ</option>
+              </select>
+              <select id="stageFilter">
+                <option value="">단계 전체</option>
+                <option value="초입">초입</option>
+                <option value="중간">중간</option>
+                <option value="후반">후반</option>
+                <option value="과열">과열</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>종목</th>
+                    <th>시장</th>
+                    <th>업종</th>
+                    <th>시총구간</th>
+                    <th>전일 종가</th>
+                    <th>PER</th>
+                    <th>PBR</th>
+                    <th>배당 T</th>
+                    <th>배당 N</th>
+                    <th>6M</th>
+                    <th>Value</th>
+                    <th>Value Style</th>
+                    <th>Growth</th>
+                    <th>Growth Style</th>
+                    <th>Leader</th>
+                    <th>Core</th>
+                    <th>최근반복</th>
+                    <th>Stage</th>
+                    <th>태그</th>
+                    <th>결측</th>
+                  </tr>
+                </thead>
+                <tbody id="universeBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head">
+              <h2 id="detail-deck">종목 상세 카드</h2>
+              <span>메인과 키워드 탭에서 고른 종목을 여기서 자세히 읽습니다.</span>
+            </div>
+            <div class="detail-grid">{detail_deck_html}</div>
+          </section>
+        </div>
+      </div>
+    </div>
   </div>
   <script>
     const universeRows = {universe_json};
@@ -1135,6 +1214,34 @@ def _build_html(
     const bucketFilter = document.getElementById("bucketFilter");
     const marketFilter = document.getElementById("marketFilter");
     const stageFilter = document.getElementById("stageFilter");
+    const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
+    const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+
+    function activateTab(tabName, updateHash = false) {{
+      tabButtons.forEach((button) => {{
+        const active = button.dataset.tab === tabName;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      }});
+      tabPanels.forEach((panel) => {{
+        panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
+      }});
+      if (updateHash) {{
+        const targetHash = `tab-${{tabName}}`;
+        if (window.location.hash !== `#${{targetHash}}`) {{
+          history.replaceState(null, "", `#${{targetHash}}`);
+        }}
+      }}
+    }}
+
+    function tabForHash(hash) {{
+      if (!hash) return "main";
+      if (hash === "#tab-keywords") return "keywords";
+      if (hash === "#tab-detail") return "detail";
+      if (hash.startsWith("#detail-") || hash === "#detail-deck" || hash === "#candidate-explorer") return "detail";
+      if (hash.startsWith("#keyword-")) return "keywords";
+      return "main";
+    }}
 
     function stageBadge(stage) {{
       return `<span class="stage stage-${{stage || '초입'}}">${{stage || '-'}}</span>`;
@@ -1205,6 +1312,19 @@ def _build_html(
     bucketFilter.addEventListener("change", renderUniverse);
     marketFilter.addEventListener("change", renderUniverse);
     stageFilter.addEventListener("change", renderUniverse);
+    tabButtons.forEach((button) => {{
+      button.addEventListener("click", () => activateTab(button.dataset.tab, true));
+    }});
+    document.querySelectorAll("[data-tab-link]").forEach((link) => {{
+      link.addEventListener("click", () => {{
+        const tabName = link.getAttribute("data-tab-link");
+        if (tabName) activateTab(tabName, false);
+      }});
+    }});
+    window.addEventListener("hashchange", () => {{
+      activateTab(tabForHash(window.location.hash), false);
+    }});
+    activateTab(tabForHash(window.location.hash), false);
     renderUniverse();
   </script>
 </body>
