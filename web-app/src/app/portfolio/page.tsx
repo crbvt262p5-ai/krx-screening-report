@@ -1,4 +1,4 @@
-import { PortfolioDashboard } from "@/components/portfolio-dashboard";
+import { PortfolioWorkspace } from "@/components/portfolio-workspace";
 import { loadDefaultPortfolioRows } from "@/lib/portfolio-data";
 import { loadLatestScreeningRecords } from "@/lib/portfolio-screening";
 
@@ -10,5 +10,5 @@ export default async function PortfolioPage() {
     loadLatestScreeningRecords(),
   ]);
 
-  return <PortfolioDashboard initialRows={initialRows} screeningRecords={screeningRecords} />;
+  return <PortfolioWorkspace initialRows={initialRows} screeningRecords={screeningRecords} />;
 }

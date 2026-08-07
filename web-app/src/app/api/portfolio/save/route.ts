@@ -11,6 +11,7 @@ function resolvePortfolioPath() {
 
 function toExportRows(rows: PortfolioPosition[]) {
   return rows.map((row) => ({
+    account_section: row.accountSection,
     ticker: row.ticker,
     name: row.name,
     market_scope: row.marketScope,

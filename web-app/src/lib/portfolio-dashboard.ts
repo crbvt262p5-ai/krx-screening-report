@@ -1,5 +1,6 @@
 export type PortfolioPosition = {
   rowId: string;
+  accountSection: "taxable" | "dc";
   ticker: string;
   name: string;
   marketScope: string;
@@ -45,6 +46,7 @@ function repairMojibake(value: string) {
 }
 
 const FIELD_ALIASES: Record<Exclude<keyof PortfolioPosition, "rowId">, string[]> = {
+  accountSection: ["account_section", "accountSection", "계좌구분", "계좌"],
   ticker: ["ticker", "티커", "종목코드"],
   name: ["name", "종목명"],
   marketScope: ["market_scope", "marketScope", "국내해외", "시장구분"],
@@ -69,6 +71,14 @@ const FIELD_ALIASES: Record<Exclude<keyof PortfolioPosition, "rowId">, string[]>
   plannedAction: ["planned_action", "plannedAction", "액션", "운영액션"],
   notes: ["notes", "메모", "노트"],
 };
+
+function inferAccountSection(record: RawRecord, ticker: string): "taxable" | "dc" {
+  const raw = toCellString(readField(record, FIELD_ALIASES.accountSection)).toLowerCase();
+  if (raw === "dc" || raw === "irp" || raw.includes("퇴직")) {
+    return "dc";
+  }
+  return ticker.toUpperCase().startsWith("DC-") ? "dc" : "taxable";
+}
 
 function toCellString(value: unknown): string {
   if (value === null || value === undefined) {
@@ -168,13 +178,15 @@ export function normalizePortfolioRecords(records: RawRecord[]): PortfolioPositi
     .map((record, index) => {
       const ticker = toCellString(readField(record, FIELD_ALIASES.ticker));
       const name = toCellString(readField(record, FIELD_ALIASES.name));
+      const accountSection = inferAccountSection(record, ticker);
       const assetClass = inferAssetClass(name, toCellString(readField(record, FIELD_ALIASES.assetClass)));
       const marketScope = inferMarketScope(ticker, assetClass, toCellString(readField(record, FIELD_ALIASES.marketScope)));
       const country = inferCountry(marketScope, ticker, toCellString(readField(record, FIELD_ALIASES.country)));
       const theme = toCellString(readField(record, FIELD_ALIASES.theme)) || "미분류";
 
       return {
-        rowId: `${ticker || "row"}-${name || "position"}-${index + 1}`,
+        rowId: `${accountSection === "dc" ? "DC-" : ""}${ticker || "row"}-${name || "position"}-${index + 1}`,
+        accountSection,
         ticker,
         name,
         marketScope,

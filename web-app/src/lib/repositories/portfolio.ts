@@ -42,15 +42,25 @@ export async function upsertPortfolioPositions(rows: PortfolioPosition[]) {
   }
 
   const payload = rows.map((row, index) => toPortfolioPositionRow(row, index));
-  const rowIds = payload.map((row) => row.row_id);
+  const sections = new Set(rows.map((row) => row.accountSection));
 
-  const { error: deleteError } = await supabase
-    .from("portfolio_positions")
-    .delete()
-    .not("row_id", "in", `(${rowIds.map((rowId) => `"${rowId}"`).join(",")})`);
+  for (const section of sections) {
+    const sectionRows = payload.filter((_, index) => rows[index].accountSection === section);
+    const rowIds = sectionRows.map((row) => row.row_id);
+    let deleteQuery = supabase
+      .from("portfolio_positions")
+      .delete()
+      .not("row_id", "in", `(${rowIds.map((rowId) => `"${rowId}"`).join(",")})`);
 
-  if (deleteError) {
-    throw new Error("기존 포트폴리오 정리에 실패했습니다.");
+    deleteQuery =
+      section === "dc"
+        ? deleteQuery.like("row_id", "DC-%")
+        : deleteQuery.not("row_id", "like", "DC-%");
+
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) {
+      throw new Error(`${section === "dc" ? "DC" : "일반계좌"} 포트폴리오 정리에 실패했습니다.`);
+    }
   }
 
   const { error } = await supabase

@@ -162,6 +162,7 @@ export function toFeedingLogRow(log: FeedingLog): FeedingLogRow {
 export function mapPortfolioPositionRow(row: PortfolioPositionRow): PortfolioPosition {
   return {
     rowId: row.row_id,
+    accountSection: row.row_id.startsWith("DC-") ? "dc" : "taxable",
     ticker: row.ticker,
     name: row.name,
     marketScope: row.market_scope,
