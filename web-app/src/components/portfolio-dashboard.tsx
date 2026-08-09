@@ -703,15 +703,36 @@ export function PortfolioDashboard({ initialRows, screeningRecords }: PortfolioD
   const deferredQuery = useDeferredValue(query);
   const screeningLookup = useMemo(() => buildScreeningLookup(screeningRecords), [screeningRecords]);
   const displayRows = useMemo<ScreenedPortfolioPosition[]>(
-    () =>
-      rows.map((row) => {
+    () => {
+      const screenedRows = rows.map((row) => {
         const screening = matchScreeningRecord(row, screeningLookup);
         return {
           ...withScreeningFallback(row, screening),
           screening,
         };
-      }),
-    [rows, screeningLookup],
+      });
+      const hasLiveValues = screenedRows.some((row) =>
+        Number.isFinite(marketSnapshots[row.rowId]?.estimatedHoldingValueKrw),
+      );
+
+      if (!hasLiveValues) {
+        return screenedRows;
+      }
+
+      const resolvedValues = screenedRows.map((row) =>
+        marketSnapshots[row.rowId]?.estimatedHoldingValueKrw ?? parseSavedPositionValue(row.notes) ?? 0,
+      );
+      const totalValue = resolvedValues.reduce((sum, value) => sum + value, 0);
+      if (totalValue <= 0) {
+        return screenedRows;
+      }
+
+      return screenedRows.map((row, index) => ({
+        ...row,
+        actualWeightPct: (resolvedValues[index] / totalValue) * 100,
+      }));
+    },
+    [marketSnapshots, rows, screeningLookup],
   );
 
   const filteredRows = useMemo(() => {

@@ -24,9 +24,19 @@ export type PortfolioMarketSnapshot = {
   estimatedDayPnlKrw: number | null;
 };
 
-const YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
+const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_REQUEST_CONCURRENCY = 8;
 
 const OVERSEAS_TICKER_ALIASES: Record<string, string[]> = {
+  "kodex 고배당주": ["279530.KS"],
+  "kiwoom 미국고배...": ["0107F0.KS"],
+  "kiwoom 미국고배당&ai테크": ["0107F0.KS"],
+  "koact k수출핵심...": ["0074K0.KS"],
+  "koact k수출핵심기업top30": ["0074K0.KS"],
+  "tiger 은행고배...": ["466940.KS"],
+  "tiger 은행고배당플러스top10": ["466940.KS"],
+  "tiger 지주회사": ["307520.KS"],
+  "kodex 미국나스닥100": ["379810.KS"],
   "스미토모": ["8053.T"],
   "스미토모상사": ["8053.T"],
   "sumitomo": ["8053.T"],
@@ -81,38 +91,90 @@ function metricCount(quote: YahooQuote | undefined) {
   return [quote.regularMarketPrice, quote.regularMarketPreviousClose, quote.regularMarketChangePercent].filter(isFiniteNumber).length;
 }
 
-async function fetchYahooQuotes(symbols: string[]) {
-  if (symbols.length === 0) {
-    return new Map<string, YahooQuote>();
-  }
+async function fetchYahooChartQuote(symbol: string): Promise<YahooQuote | null> {
+  const url = new URL(`${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}`);
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("range", "5d");
 
-  const url = new URL(YAHOO_QUOTE_URL);
-  url.searchParams.set("symbols", symbols.join(","));
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
+    if (!response.ok) {
+      return null;
+    }
 
-  if (!response.ok) {
-    throw new Error(`Yahoo 시세 조회 실패 (${response.status})`);
-  }
-
-  const payload = (await response.json()) as {
-    quoteResponse?: {
-      result?: YahooQuote[];
+    const payload = (await response.json()) as {
+      chart?: {
+        result?: Array<{
+          meta?: {
+            symbol?: string;
+            currency?: string | null;
+            regularMarketPrice?: number | null;
+            chartPreviousClose?: number | null;
+          };
+          indicators?: {
+            quote?: Array<{ close?: Array<number | null> }>;
+          };
+        }>;
+      };
     };
-  };
+    const result = payload.chart?.result?.[0];
+    const meta = result?.meta;
+    if (!meta || !isFiniteNumber(meta.regularMarketPrice)) {
+      return null;
+    }
 
-  const results = payload.quoteResponse?.result ?? [];
-  return new Map(
-    results
-      .filter((item) => typeof item.symbol === "string" && item.symbol.length > 0)
-      .map((item) => [item.symbol as string, item]),
+    const closes = (result.indicators?.quote?.[0]?.close ?? []).filter(isFiniteNumber);
+    const previousClose = closes.length >= 2
+      ? closes.at(-2) ?? null
+      : isFiniteNumber(meta.chartPreviousClose)
+        ? meta.chartPreviousClose
+        : null;
+    const changePct = previousClose && previousClose !== 0
+      ? ((meta.regularMarketPrice - previousClose) / previousClose) * 100
+      : null;
+
+    return {
+      symbol: meta.symbol ?? symbol,
+      currency: meta.currency ?? null,
+      regularMarketPrice: meta.regularMarketPrice,
+      regularMarketPreviousClose: previousClose,
+      regularMarketChangePercent: changePct,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchYahooQuotes(symbols: string[]) {
+  const uniqueSymbols = [...new Set(symbols)];
+  const quotes = new Map<string, YahooQuote>();
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < uniqueSymbols.length) {
+      const symbol = uniqueSymbols[cursor];
+      cursor += 1;
+      const quote = await fetchYahooChartQuote(symbol);
+      if (quote) {
+        quotes.set(symbol, quote);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(YAHOO_REQUEST_CONCURRENCY, uniqueSymbols.length) },
+      () => worker(),
+    ),
   );
+  return quotes;
 }
 
 function parseShareCount(notes: string) {
