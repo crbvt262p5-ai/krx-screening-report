@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 from pathlib import Path
 
@@ -33,6 +34,16 @@ def _latest_report_date() -> str:
     if not dated_reports:
         return "unknown"
     return dated_reports[-1].stem.replace("daily_", "")
+
+
+def _load_run_status() -> dict[str, object]:
+    path = BASE_DIR / "data" / "run_status.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _core_missing_count(frame: pd.DataFrame) -> int:
@@ -159,9 +170,20 @@ def main() -> None:
 
     frame = pd.read_csv(csv_path)
     report_date = _latest_report_date()
+    run_status = _load_run_status()
 
     excluded_count = int(frame["excluded"].astype(str).str.lower().eq("true").sum()) if "excluded" in frame.columns else 0
     core_missing = _core_missing_count(frame)
+
+    mode = str(run_status.get("mode", "") or "").strip()
+    trading_date = str(run_status.get("trading_date", "") or "").strip()
+    status_lines: list[str] = []
+    if mode == "cached_trading_date":
+        status_lines.append("운영 모드: <b>캐시 fallback</b>")
+        if trading_date:
+            status_lines.append(f"기준 거래일: <b>{html.escape(trading_date)}</b>")
+    elif mode == "live":
+        status_lines.append("운영 모드: <b>라이브</b>")
 
     value_top = _slice_top(frame, "value_score", count=5, exclude_flag=True)
     growth_top = _slice_top(frame, "growth_early_score", count=5)
@@ -171,6 +193,7 @@ def main() -> None:
 
     lines: list[str] = [
         f"<b>KRX Daily Screening</b> {html.escape(report_date)}",
+        *status_lines,
         f"전체 스캔 종목: <b>{len(frame):,}</b>",
         f"급등 제외 종목: <b>{excluded_count:,}</b>",
         f"핵심 데이터 부족: <b>{core_missing:,}</b>",

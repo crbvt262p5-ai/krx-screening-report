@@ -24,10 +24,11 @@ except ImportError:  # pragma: no cover
 class MarketDataBundle:
     trading_date: date
     equities: list[EquitySnapshot]
+    used_cached_trading_date: bool = False
 
 
 def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataBundle:
-    trading_date = resolve_latest_trading_date(target_date, logger)
+    trading_date, used_cached_trading_date = resolve_latest_trading_date(target_date, logger)
     logger.info("Using trading date %s", trading_date.isoformat())
 
     listings = []
@@ -92,10 +93,14 @@ def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataB
 
     _enrich_with_investor_flows(equities, trading_date, logger)
 
-    return MarketDataBundle(trading_date=trading_date, equities=equities)
+    return MarketDataBundle(
+        trading_date=trading_date,
+        equities=equities,
+        used_cached_trading_date=used_cached_trading_date,
+    )
 
 
-def resolve_latest_trading_date(target_date: date, logger: logging.Logger) -> date:
+def resolve_latest_trading_date(target_date: date, logger: logging.Logger) -> tuple[date, bool]:
     if pykrx_stock is None and fdr is None:
         cached_date = _load_cached_trading_date(logger)
         if cached_date is not None:
@@ -103,13 +108,13 @@ def resolve_latest_trading_date(target_date: date, logger: logging.Logger) -> da
                 "Live trading-date sources unavailable; using cached trading date %s",
                 cached_date.isoformat(),
             )
-            return cached_date
+            return cached_date, True
         raise RuntimeError("pykrx or FinanceDataReader is required to resolve trading dates.")
 
     for offset in range(0, 10):
         candidate = target_date - timedelta(days=offset)
         if _has_market_data(candidate.strftime("%Y%m%d"), logger):
-            return candidate
+            return candidate, False
 
     cached_date = _load_cached_trading_date(logger)
     if cached_date is not None:
@@ -117,7 +122,7 @@ def resolve_latest_trading_date(target_date: date, logger: logging.Logger) -> da
             "Could not resolve a live KRX trading date; falling back to cached trading date %s",
             cached_date.isoformat(),
         )
-        return cached_date
+        return cached_date, True
     raise RuntimeError("Could not resolve a recent KRX trading date.")
 
 

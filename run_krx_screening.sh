@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-set -euo pipefail
+set -uo pipefail
 
 ROOT="/Users/taeheehong/Documents/Playground"
 VENV="$ROOT/.venv"
@@ -21,5 +21,20 @@ fi
 cd "$ROOT"
 export PYTHONPYCACHEPREFIX="$ROOT/.cache/python"
 export MPLCONFIGDIR="$ROOT/.cache/matplotlib"
-python3 -m krx_screening.main >> "$LOG_DIR/krx_screening_runner.log" 2>&1
-python3 scripts/verify_krx_outputs.py >> "$LOG_DIR/krx_screening_runner.log" 2>&1
+
+{
+  echo "===== $(date '+%Y-%m-%d %H:%M:%S') run start ====="
+  python3 -m krx_screening.main
+  main_exit=$?
+  echo "main_exit=$main_exit"
+
+  python3 scripts/verify_krx_outputs.py
+  verify_exit=$?
+  echo "verify_exit=$verify_exit"
+  echo "===== $(date '+%Y-%m-%d %H:%M:%S') run end ====="
+
+  if [ "$main_exit" -ne 0 ]; then
+    exit "$main_exit"
+  fi
+  exit "$verify_exit"
+} >> "$LOG_DIR/krx_screening_runner.log" 2>&1
