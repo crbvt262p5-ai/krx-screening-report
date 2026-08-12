@@ -97,12 +97,27 @@ def load_market_bundle(target_date: date, logger: logging.Logger) -> MarketDataB
 
 def resolve_latest_trading_date(target_date: date, logger: logging.Logger) -> date:
     if pykrx_stock is None and fdr is None:
+        cached_date = _load_cached_trading_date(logger)
+        if cached_date is not None:
+            logger.warning(
+                "Live trading-date sources unavailable; using cached trading date %s",
+                cached_date.isoformat(),
+            )
+            return cached_date
         raise RuntimeError("pykrx or FinanceDataReader is required to resolve trading dates.")
 
     for offset in range(0, 10):
         candidate = target_date - timedelta(days=offset)
         if _has_market_data(candidate.strftime("%Y%m%d"), logger):
             return candidate
+
+    cached_date = _load_cached_trading_date(logger)
+    if cached_date is not None:
+        logger.warning(
+            "Could not resolve a live KRX trading date; falling back to cached trading date %s",
+            cached_date.isoformat(),
+        )
+        return cached_date
     raise RuntimeError("Could not resolve a recent KRX trading date.")
 
 
@@ -524,6 +539,23 @@ def _load_cached_market_listing(
         logger.info("Loaded cached universe from %s for %s", path.name, market)
         return listings, detail_map
     return [], {}
+
+
+def _load_cached_trading_date(logger: logging.Logger) -> date | None:
+    data_dir = Path.cwd() / "data"
+    candidates: list[date] = []
+    for path in sorted(data_dir.glob("screened_*.csv"), reverse=True):
+        stem = path.stem
+        prefix = "screened_"
+        if not stem.startswith(prefix):
+            continue
+        raw = stem[len(prefix):]
+        try:
+            candidates.append(date.fromisoformat(raw))
+        except ValueError:
+            logger.warning("Ignoring malformed cached screening filename: %s", path.name)
+            continue
+    return candidates[0] if candidates else None
 
 
 def _safe_row(frame: pd.DataFrame | None, ticker: str) -> pd.Series:
