@@ -24,6 +24,9 @@ export MPLCONFIGDIR="$ROOT/.cache/matplotlib"
 
 {
   echo "===== $(date '+%Y-%m-%d %H:%M:%S') run start ====="
+  python3 scripts/check_krx_network_health.py
+  network_exit=$?
+  echo "network_exit=$network_exit"
   python3 -m krx_screening.main
   main_exit=$?
   echo "main_exit=$main_exit"
