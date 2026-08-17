@@ -75,6 +75,8 @@ def main() -> None:
 
     latest_html = REPORTS_DIR / "latest.html"
     latest_md = REPORTS_DIR / "latest.md"
+    validation_html = REPORTS_DIR / "validation.html"
+    validation_md = REPORTS_DIR / "validation.md"
     latest_csv = DATA_DIR / "latest.csv"
     dated_html = REPORTS_DIR / f"daily_{report_date}.html"
     dated_md = REPORTS_DIR / f"daily_{report_date}.md"
@@ -83,6 +85,8 @@ def main() -> None:
     _copy_if_exists(latest_html if latest_html.exists() else dated_html, SITE_DIR / "index.html")
     _copy_if_exists(latest_html if latest_html.exists() else dated_html, SITE_DIR / "latest.html")
     _copy_if_exists(latest_md if latest_md.exists() else dated_md, SITE_DIR / "latest.md")
+    _copy_if_exists(validation_html, SITE_DIR / "validation.html")
+    _copy_if_exists(validation_md, SITE_DIR / "validation.md")
     _copy_if_exists(latest_csv if latest_csv.exists() else dated_csv, SITE_DIR / "latest.csv")
 
     _copy_if_exists(dated_html, SITE_REPORTS_DIR / f"daily_{report_date}.html")
@@ -96,6 +100,8 @@ def main() -> None:
         "index": "index.html",
         "latest_html": "latest.html",
         "latest_markdown": "latest.md",
+        "validation_html": "validation.html",
+        "validation_markdown": "validation.md",
         "latest_csv": "latest.csv",
     }
     (SITE_DIR / "manifest.json").write_text(

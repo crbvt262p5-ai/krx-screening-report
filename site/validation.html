@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KRX Validation</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Pretendard", "SUIT", "Apple SD Gothic Neo", sans-serif;
+      background: #f7f4ee;
+      color: #1f1a14;
+    }
+    .shell { width: min(1280px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    .hero {
+      background: #fffaf3;
+      border: 1px solid rgba(44,36,27,0.10);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 24px 60px rgba(58,42,24,0.10);
+    }
+    h1 { margin: 0 0 8px; font-size: 38px; }
+    p, li { color: #6b6257; line-height: 1.6; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .chip {
+      display: inline-flex; padding: 8px 12px; border-radius: 999px;
+      background: #fff; border: 1px solid rgba(44,36,27,0.10); font-size: 13px;
+    }
+    .section { margin-top: 22px; background: rgba(255,255,255,0.82); border: 1px solid rgba(44,36,27,0.08); border-radius: 22px; padding: 22px; }
+    .section h2 { margin: 0 0 10px; font-size: 22px; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th, .data-table td { padding: 10px 12px; border-bottom: 1px solid rgba(44,36,27,0.08); text-align: left; }
+    .data-table th { background: #f3eadb; position: sticky; top: 0; }
+    .table-wrap { overflow: auto; }
+    .empty { color: #6b6257; }
+    a { color: #0f766e; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div><a href="latest.html">스크리닝으로 돌아가기</a></div>
+      <h1>KRX Validation</h1>
+      <p>스크리닝이 실제로 이후 스냅샷에서 얼마나 먹혔는지 버킷과 테마별로 확인하는 페이지입니다.</p>
+      <div class="meta">
+        <span class="chip">검증 스냅샷 13개</span>
+        <span class="chip">검증 구간 2026-05-08 ~ 2026-08-14</span>
+        <span class="chip">최신 기준 2026-08-14</span>
+      </div>
+      <p>거래일이 연속적이지 않아 &#x27;다음 스냅샷&#x27; 기준 성과와 &#x27;최신 스냅샷까지 보유&#x27; 성과를 함께 봅니다.</p>
+    </section>
+    <section class="section">
+      <h2>Bucket Validation</h2>
+      <div class="table-wrap"><table class="dataframe data-table">
+  <thead>
+    <tr style="text-align: left;">
+      <th>bucket</th>
+      <th>observations</th>
+      <th>next_return</th>
+      <th>next_hit_rate</th>
+      <th>next_outperformance</th>
+      <th>latest_return</th>
+      <th>latest_hit_rate</th>
+      <th>latest_outperformance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>가치함정 경고</td>
+      <td>498</td>
+      <td>0.837500</td>
+      <td>9.425000</td>
+      <td>1.365</td>
+      <td>3.600833</td>
+      <td>21.025000</td>
+      <td>5.052500</td>
+    </tr>
+    <tr>
+      <td>Value Core</td>
+      <td>56</td>
+      <td>0.617500</td>
+      <td>8.566667</td>
+      <td>0.045</td>
+      <td>1.190000</td>
+      <td>14.650000</td>
+      <td>-1.596667</td>
+    </tr>
+    <tr>
+      <td>소액 관찰</td>
+      <td>338</td>
+      <td>0.428333</td>
+      <td>9.333333</td>
+      <td>-1.090</td>
+      <td>1.340000</td>
+      <td>20.175000</td>
+      <td>-1.730000</td>
+    </tr>
+    <tr>
+      <td>Growth Core</td>
+      <td>10</td>
+      <td>0.620833</td>
+      <td>8.333333</td>
+      <td>0.065</td>
+      <td>1.094167</td>
+      <td>13.891667</td>
+      <td>-1.980000</td>
+    </tr>
+    <tr>
+      <td>실매수 검토</td>
+      <td>88</td>
+      <td>0.620000</td>
+      <td>8.558333</td>
+      <td>0.060</td>
+      <td>1.131667</td>
+      <td>17.258333</td>
+      <td>-2.355000</td>
+    </tr>
+    <tr>
+      <td>Cycle Leader</td>
+      <td>7</td>
+      <td>-0.083333</td>
+      <td>8.333333</td>
+      <td>-4.160</td>
+      <td>0.271667</td>
+      <td>8.333333</td>
+      <td>-5.270000</td>
+    </tr>
+    <tr>
+      <td>Leader Candidate</td>
+      <td>36</td>
+      <td>0.150000</td>
+      <td>8.333333</td>
+      <td>-2.760</td>
+      <td>-0.638333</td>
+      <td>10.833333</td>
+      <td>-8.910000</td>
+    </tr>
+  </tbody>
+</table></div>
+    </section>
+    <section class="section">
+      <h2>Theme Validation</h2>
+      <div class="table-wrap"><div class='empty'>데이터 없음</div></div>
+    </section>
+    <section class="section">
+      <h2>Sample Observations</h2>
+      <div class="table-wrap"><table class="dataframe data-table">
+  <thead>
+    <tr style="text-align: left;">
+      <th>asof_date</th>
+      <th>ticker</th>
+      <th>name</th>
+      <th>bucket</th>
+      <th>theme</th>
+      <th>sub_theme</th>
+      <th>start_close</th>
+      <th>next_return</th>
+      <th>latest_return</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2026-07-31</td>
+      <td>010130</td>
+      <td>고려아연</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>999000.0</td>
+      <td>19.719720</td>
+      <td>19.719720</td>
+    </tr>
+    <tr>
+      <td>2026-07-31</td>
+      <td>267250</td>
+      <td>HD현대</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>199600.0</td>
+      <td>17.985972</td>
+      <td>17.985972</td>
+    </tr>
+    <tr>
+      <td>2026-07-31</td>
+      <td>011210</td>
+      <td>현대위아</td>
+      <td>Value Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>58200.0</td>
+      <td>16.494845</td>
+      <td>16.494845</td>
+    </tr>
+    <tr>
+      <td>2026-07-31</td>
+      <td>443060</td>
+      <td>HD현대마린솔루션</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>184000.0</td>
+      <td>6.956522</td>
+      <td>6.956522</td>
+    </tr>
+    <tr>
+      <td>2026-07-31</td>
+      <td>009540</td>
+      <td>HD한국조선해양</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>384500.0</td>
+      <td>0.390117</td>
+      <td>0.390117</td>
+    </tr>
+    <tr>
+      <td>2026-07-07</td>
+      <td>181710</td>
+      <td>NHN</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>38800.0</td>
+      <td>-4.381443</td>
+      <td>92.525773</td>
+    </tr>
+    <tr>
+      <td>2026-07-07</td>
+      <td>267250</td>
+      <td>HD현대</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>210500.0</td>
+      <td>-5.178147</td>
+      <td>11.876485</td>
+    </tr>
+    <tr>
+      <td>2026-07-07</td>
+      <td>267270</td>
+      <td>HD건설기계</td>
+      <td>Value Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>126100.0</td>
+      <td>-0.951626</td>
+      <td>9.912768</td>
+    </tr>
+    <tr>
+      <td>2026-07-07</td>
+      <td>007070</td>
+      <td>GS리테일</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>25800.0</td>
+      <td>-4.069767</td>
+      <td>7.364341</td>
+    </tr>
+    <tr>
+      <td>2026-07-07</td>
+      <td>120110</td>
+      <td>코오롱인더</td>
+      <td>Value Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>59100.0</td>
+      <td>-18.697124</td>
+      <td>-6.429780</td>
+    </tr>
+    <tr>
+      <td>2026-07-04</td>
+      <td>007070</td>
+      <td>GS리테일</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>24550.0</td>
+      <td>NaN</td>
+      <td>12.830957</td>
+    </tr>
+    <tr>
+      <td>2026-07-04</td>
+      <td>010130</td>
+      <td>고려아연</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>1201000.0</td>
+      <td>NaN</td>
+      <td>-0.416320</td>
+    </tr>
+    <tr>
+      <td>2026-07-04</td>
+      <td>267250</td>
+      <td>HD현대</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>244000.0</td>
+      <td>NaN</td>
+      <td>-3.483607</td>
+    </tr>
+    <tr>
+      <td>2026-07-04</td>
+      <td>011210</td>
+      <td>현대위아</td>
+      <td>Value Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>76900.0</td>
+      <td>NaN</td>
+      <td>-11.833550</td>
+    </tr>
+    <tr>
+      <td>2026-07-04</td>
+      <td>443060</td>
+      <td>HD현대마린솔루션</td>
+      <td>Growth Core</td>
+      <td>미분류</td>
+      <td></td>
+      <td>247500.0</td>
+      <td>NaN</td>
+      <td>-20.484848</td>
+    </tr>
+    <tr>
+      <td>2026-06-12</td>
+      <td>003350</td>
+      <td>한국화장품제조</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>8290.0</td>
+      <td>NaN</td>
+      <td>38.962606</td>
+    </tr>
+    <tr>
+      <td>2026-06-12</td>
+      <td>007070</td>
+      <td>GS리테일</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>24550.0</td>
+      <td>NaN</td>
+      <td>12.830957</td>
+    </tr>
+    <tr>
+      <td>2026-06-12</td>
+      <td>453340</td>
+      <td>현대그린푸드</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>17780.0</td>
+      <td>NaN</td>
+      <td>4.499438</td>
+    </tr>
+    <tr>
+      <td>2026-06-12</td>
+      <td>101930</td>
+      <td>인화정공</td>
+      <td>소액 관찰</td>
+      <td>미분류</td>
+      <td></td>
+      <td>9020.0</td>
+      <td>NaN</td>
+      <td>-8.203991</td>
+    </tr>
+    <tr>
+      <td>2026-06-12</td>
+      <td>443060</td>
+      <td>HD현대마린솔루션</td>
+      <td>실매수 검토</td>
+      <td>미분류</td>
+      <td></td>
+      <td>247500.0</td>
+      <td>NaN</td>
+      <td>-20.484848</td>
+    </tr>
+  </tbody>
+</table></div>
+    </section>
+    </div>
+</body>
+</html>

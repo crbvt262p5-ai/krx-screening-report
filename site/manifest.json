@@ -3,5 +3,7 @@
   "index": "index.html",
   "latest_html": "latest.html",
   "latest_markdown": "latest.md",
+  "validation_html": "validation.html",
+  "validation_markdown": "validation.md",
   "latest_csv": "latest.csv"
 }

@@ -66,8 +66,321 @@ def write_outputs(
             handle.write(markdown)
         with latest_html_path.open("w", encoding="utf-8") as handle:
             handle.write(html)
+    _write_validation_outputs(settings)
 
     return str(md_path), str(csv_path), health.publishable
+
+
+def _write_validation_outputs(settings: Settings) -> None:
+    validation = _build_validation_payload(settings)
+    if validation is None:
+        return
+
+    md_path = settings.reports_dir / "validation.md"
+    html_path = settings.reports_dir / "validation.html"
+    md_path.write_text(_build_validation_markdown(validation), encoding="utf-8")
+    html_path.write_text(_build_validation_html(validation), encoding="utf-8")
+
+
+def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
+    files = sorted(settings.data_dir.glob("screened_*.csv"))
+    snapshots: list[tuple[str, pd.DataFrame]] = []
+    for path in files:
+        try:
+            frame = pd.read_csv(path, encoding="utf-8-sig")
+        except Exception:
+            continue
+        snapshots.append((path.stem.replace("screened_", ""), _normalize_frame(frame)))
+
+    if len(snapshots) < 3:
+        return None
+
+    bucket_rows: list[dict[str, object]] = []
+    theme_rows: list[dict[str, object]] = []
+    observations: list[dict[str, object]] = []
+
+    latest_date, latest_frame = snapshots[-1]
+    latest_prices = _validation_price_map(latest_frame)
+
+    bucket_filters = [
+        ("Value Core", lambda frame: frame["core_bucket"].fillna("") == "Value Core"),
+        ("Growth Core", lambda frame: frame["core_bucket"].fillna("") == "Growth Core"),
+        ("Cycle Leader", lambda frame: frame["leader_bucket"].fillna("") == "Leader"),
+        ("Leader Candidate", lambda frame: frame["leader_bucket"].fillna("") == "Leader Candidate"),
+        ("실매수 검토", lambda frame: frame["recommendation_bucket"].fillna("") == "실매수 검토"),
+        ("소액 관찰", lambda frame: frame["recommendation_bucket"].fillna("") == "소액 관찰"),
+        ("가치함정 경고", lambda frame: frame["recommendation_bucket"].fillna("") == "가치함정 경고"),
+    ]
+
+    for index, (asof_date, frame) in enumerate(snapshots[:-1]):
+        next_date, next_frame = snapshots[index + 1]
+        next_prices = _validation_price_map(next_frame)
+        source = frame.copy()
+        source["theme"] = source["theme"].fillna("미분류").replace("", "미분류")
+        source["sub_theme"] = source["sub_theme"].fillna("").replace("", "")
+        source["theme_gate_pass"] = source["theme_gate_pass"].astype(str).str.lower().eq("true")
+
+        benchmark = _compute_bucket_return(
+            source[source["recommendation_bucket"].fillna("") != "제외"],
+            next_prices,
+        )
+        benchmark_latest = _compute_bucket_return(
+            source[source["recommendation_bucket"].fillna("") != "제외"],
+            latest_prices,
+        )
+
+        for bucket_name, bucket_filter in bucket_filters:
+            bucket_frame = source[bucket_filter(source)]
+            next_stats = _compute_bucket_return(bucket_frame, next_prices)
+            latest_stats = _compute_bucket_return(bucket_frame, latest_prices)
+            bucket_rows.append(
+                {
+                    "asof_date": asof_date,
+                    "bucket": bucket_name,
+                    "count": int(len(bucket_frame)),
+                    "next_date": next_date,
+                    "next_return": next_stats["avg_return"],
+                    "next_hit_rate": next_stats["positive_rate"],
+                    "next_coverage": next_stats["coverage"],
+                    "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
+                    "latest_date": latest_date,
+                    "latest_return": latest_stats["avg_return"],
+                    "latest_hit_rate": latest_stats["positive_rate"],
+                    "latest_coverage": latest_stats["coverage"],
+                    "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
+                }
+            )
+
+        themed = source[
+            (source["recommendation_bucket"].fillna("") != "제외")
+            & (source["theme_gate_pass"])
+            & (source["theme"] != "미분류")
+        ]
+        for theme, group in themed.groupby("theme", dropna=False):
+            next_stats = _compute_bucket_return(group, next_prices)
+            latest_stats = _compute_bucket_return(group, latest_prices)
+            theme_rows.append(
+                {
+                    "asof_date": asof_date,
+                    "theme": str(theme),
+                    "count": int(len(group)),
+                    "next_return": next_stats["avg_return"],
+                    "next_hit_rate": next_stats["positive_rate"],
+                    "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
+                    "latest_return": latest_stats["avg_return"],
+                    "latest_hit_rate": latest_stats["positive_rate"],
+                    "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
+                }
+            )
+
+        top_picks = source[
+            source["recommendation_bucket"].fillna("").isin(["실매수 검토", "소액 관찰"])
+        ].sort_values(by=["final_score"], ascending=False).head(5)
+        for row in top_picks.itertuples(index=False):
+            next_close = next_prices.get(str(getattr(row, "ticker", "")))
+            latest_close = latest_prices.get(str(getattr(row, "ticker", "")))
+            start_close = _num(getattr(row, "prev_close", None))
+            if not start_close or start_close <= 0:
+                continue
+            observations.append(
+                {
+                    "asof_date": asof_date,
+                    "ticker": str(getattr(row, "ticker", "")),
+                    "name": str(getattr(row, "name", "")),
+                    "bucket": str(getattr(row, "core_bucket", "") or getattr(row, "recommendation_bucket", "") or "-"),
+                    "theme": str(getattr(row, "theme", "") or "미분류"),
+                    "sub_theme": str(getattr(row, "sub_theme", "") or ""),
+                    "start_close": start_close,
+                    "next_return": ((next_close / start_close) - 1) * 100 if next_close else None,
+                    "latest_return": ((latest_close / start_close) - 1) * 100 if latest_close else None,
+                }
+            )
+
+    bucket_summary = _aggregate_validation_rows(pd.DataFrame(bucket_rows), key="bucket")
+    theme_summary = _aggregate_validation_rows(pd.DataFrame(theme_rows), key="theme", min_count=2)
+    observations_frame = pd.DataFrame(observations).sort_values(by=["asof_date", "latest_return"], ascending=[False, False]).head(30)
+
+    return {
+        "snapshot_count": len(snapshots),
+        "date_range": f"{snapshots[0][0]} ~ {snapshots[-1][0]}",
+        "latest_date": latest_date,
+        "bucket_summary": bucket_summary,
+        "theme_summary": theme_summary,
+        "observations": observations_frame,
+        "note": "거래일이 연속적이지 않아 '다음 스냅샷' 기준 성과와 '최신 스냅샷까지 보유' 성과를 함께 봅니다.",
+    }
+
+
+def _validation_price_map(frame: pd.DataFrame) -> dict[str, float]:
+    mapping: dict[str, float] = {}
+    for row in frame.itertuples(index=False):
+        ticker = str(getattr(row, "ticker", "") or "")
+        close = _num(getattr(row, "prev_close", None))
+        if ticker and close and close > 0:
+            mapping[ticker] = close
+    return mapping
+
+
+def _compute_bucket_return(frame: pd.DataFrame, future_prices: dict[str, float]) -> dict[str, float]:
+    returns: list[float] = []
+    for row in frame.itertuples(index=False):
+        ticker = str(getattr(row, "ticker", "") or "")
+        start_close = _num(getattr(row, "prev_close", None))
+        future_close = future_prices.get(ticker)
+        if not ticker or not start_close or start_close <= 0 or not future_close:
+            continue
+        returns.append(((future_close / start_close) - 1) * 100)
+    if not returns:
+        return {"avg_return": 0.0, "positive_rate": 0.0, "coverage": 0}
+    positives = sum(1 for value in returns if value > 0)
+    return {
+        "avg_return": round(sum(returns) / len(returns), 2),
+        "positive_rate": round((positives / len(returns)) * 100, 1),
+        "coverage": len(returns),
+    }
+
+
+def _aggregate_validation_rows(frame: pd.DataFrame, key: str, min_count: int = 1) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    grouped = (
+        frame.groupby(key, dropna=False)
+        .agg(
+            observations=("count", "sum"),
+            next_return=("next_return", "mean"),
+            next_hit_rate=("next_hit_rate", "mean"),
+            next_outperformance=("next_outperformance", "mean"),
+            latest_return=("latest_return", "mean"),
+            latest_hit_rate=("latest_hit_rate", "mean"),
+            latest_outperformance=("latest_outperformance", "mean"),
+        )
+        .reset_index()
+    )
+    grouped = grouped[grouped["observations"] >= min_count]
+    grouped = grouped.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[False, False, False])
+    return grouped
+
+
+def _build_validation_markdown(payload: dict[str, object]) -> str:
+    bucket_summary = payload["bucket_summary"]
+    theme_summary = payload["theme_summary"]
+    observations = payload["observations"]
+    lines = [
+        "# KRX Screening Validation",
+        "",
+        f"- 검증 스냅샷 수: {payload['snapshot_count']}",
+        f"- 검증 구간: {payload['date_range']}",
+        f"- 최신 기준일: {payload['latest_date']}",
+        f"- 주의: {payload['note']}",
+        "",
+        "## Bucket Validation",
+        _frame_to_markdown_table(bucket_summary) if not bucket_summary.empty else "데이터 없음",
+        "",
+        "## Theme Validation",
+        _frame_to_markdown_table(theme_summary.head(20)) if not theme_summary.empty else "데이터 없음",
+        "",
+        "## Sample Observations",
+        _frame_to_markdown_table(observations) if not observations.empty else "데이터 없음",
+    ]
+    return "\n".join(lines)
+
+
+def _build_validation_html(payload: dict[str, object]) -> str:
+    bucket_summary: pd.DataFrame = payload["bucket_summary"]  # type: ignore[assignment]
+    theme_summary: pd.DataFrame = payload["theme_summary"]  # type: ignore[assignment]
+    observations: pd.DataFrame = payload["observations"]  # type: ignore[assignment]
+    bucket_table = bucket_summary.to_html(index=False, classes="data-table", border=0, justify="left") if not bucket_summary.empty else "<div class='empty'>데이터 없음</div>"
+    theme_table = theme_summary.head(20).to_html(index=False, classes="data-table", border=0, justify="left") if not theme_summary.empty else "<div class='empty'>데이터 없음</div>"
+    observation_table = observations.to_html(index=False, classes="data-table", border=0, justify="left") if not observations.empty else "<div class='empty'>데이터 없음</div>"
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KRX Validation</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: "Pretendard", "SUIT", "Apple SD Gothic Neo", sans-serif;
+      background: #f7f4ee;
+      color: #1f1a14;
+    }}
+    .shell {{ width: min(1280px, calc(100vw - 32px)); margin: 24px auto 48px; }}
+    .hero {{
+      background: #fffaf3;
+      border: 1px solid rgba(44,36,27,0.10);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 24px 60px rgba(58,42,24,0.10);
+    }}
+    h1 {{ margin: 0 0 8px; font-size: 38px; }}
+    p, li {{ color: #6b6257; line-height: 1.6; }}
+    .meta {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }}
+    .chip {{
+      display: inline-flex; padding: 8px 12px; border-radius: 999px;
+      background: #fff; border: 1px solid rgba(44,36,27,0.10); font-size: 13px;
+    }}
+    .section {{ margin-top: 22px; background: rgba(255,255,255,0.82); border: 1px solid rgba(44,36,27,0.08); border-radius: 22px; padding: 22px; }}
+    .section h2 {{ margin: 0 0 10px; font-size: 22px; }}
+    .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    .data-table th, .data-table td {{ padding: 10px 12px; border-bottom: 1px solid rgba(44,36,27,0.08); text-align: left; }}
+    .data-table th {{ background: #f3eadb; position: sticky; top: 0; }}
+    .table-wrap {{ overflow: auto; }}
+    .empty {{ color: #6b6257; }}
+    a {{ color: #0f766e; text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div><a href="latest.html">스크리닝으로 돌아가기</a></div>
+      <h1>KRX Validation</h1>
+      <p>스크리닝이 실제로 이후 스냅샷에서 얼마나 먹혔는지 버킷과 테마별로 확인하는 페이지입니다.</p>
+      <div class="meta">
+        <span class="chip">검증 스냅샷 {escape(str(payload['snapshot_count']))}개</span>
+        <span class="chip">검증 구간 {escape(str(payload['date_range']))}</span>
+        <span class="chip">최신 기준 {escape(str(payload['latest_date']))}</span>
+      </div>
+      <p>{escape(str(payload['note']))}</p>
+    </section>
+    <section class="section">
+      <h2>Bucket Validation</h2>
+      <div class="table-wrap">{bucket_table}</div>
+    </section>
+    <section class="section">
+      <h2>Theme Validation</h2>
+      <div class="table-wrap">{theme_table}</div>
+    </section>
+    <section class="section">
+      <h2>Sample Observations</h2>
+      <div class="table-wrap">{observation_table}</div>
+    </section>
+    </div>
+</body>
+</html>"""
+
+
+def _frame_to_markdown_table(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "데이터 없음"
+    render = frame.copy()
+    for column in render.columns:
+        render[column] = render[column].apply(_markdown_cell)
+    header = "| " + " | ".join(str(column) for column in render.columns) + " |"
+    divider = "| " + " | ".join("---" for _ in render.columns) + " |"
+    rows = [
+        "| " + " | ".join(str(value) for value in row) + " |"
+        for row in render.itertuples(index=False, name=None)
+    ]
+    return "\n".join([header, divider, *rows])
+
+
+def _markdown_cell(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
 
 
 def _build_markdown(
@@ -1035,6 +1348,7 @@ def _build_html(
             <a class="jump-link" href="#tab-keywords" data-tab-link="keywords">키워드 파고들기</a>
             <a class="jump-link" href="#tab-detail" data-tab-link="detail">상세 보기</a>
             <a class="jump-link" href="#candidate-explorer" data-tab-link="detail">탐색기 열기</a>
+            <a class="jump-link" href="validation.html">검증 보기</a>
           </div>
           <div class="tab-nav" role="tablist" aria-label="리포트 탭">
             <button class="tab-button active" type="button" data-tab="main" role="tab" aria-selected="true">메인</button>
