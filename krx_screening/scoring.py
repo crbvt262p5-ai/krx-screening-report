@@ -1682,7 +1682,7 @@ def _classify_theme(equity: EquitySnapshot) -> None:
 
     if gate_pass:
         equity.theme = best_theme
-        equity.sub_theme = second_theme
+        equity.sub_theme = _infer_sub_theme(best_theme, equity, second_theme)
         equity.theme_score = best_score
         equity.theme_gate_pass = True
         equity.theme_confidence = "높음" if best_score >= 8.5 and evidence_count >= 3 else "중간"
@@ -1703,6 +1703,120 @@ def _classify_theme(equity: EquitySnapshot) -> None:
         if not external_confirmation and evidence_count < 3:
             failure_reasons.append("외부 확인 부족")
         equity.theme_evidence = best_evidence[:3] + [f"테마 보류: {', '.join(failure_reasons[:2]) or '근거 부족'}"]
+
+
+def _infer_sub_theme(primary_theme: str, equity: EquitySnapshot, fallback_theme: str = "") -> str:
+    text_blob = _theme_text_blob(equity)
+    sector_text = " ".join(filter(None, [equity.sector or "", equity.industry or ""])).lower()
+
+    if primary_theme == "Shipbuilding":
+        if any(keyword in text_blob for keyword in ("해양서비스", "선박관리", "운항", "마린솔루션")):
+            return "해양서비스"
+        if any(keyword in text_blob for keyword in ("lng", "lng선", "운반선")):
+            return "LNG선"
+        return "조선"
+
+    if primary_theme == "Automotive Components":
+        if any(keyword in text_blob for keyword in ("전장", "디스플레이", "ivI", "hud", "램프")):
+            return "전장/모듈"
+        if any(keyword in text_blob for keyword in ("샤시", "브레이크", "조향")):
+            return "샤시/제동"
+        return "자동차부품"
+
+    if primary_theme == "Semiconductor Materials":
+        if any(keyword in text_blob for keyword in ("식각", "세정", "프리커서", "특수가스")):
+            return "공정소재"
+        if any(keyword in text_blob for keyword in ("slurry", "슬러리", "cmp", "연마")):
+            return "CMP 소재"
+        return "반도체소재"
+
+    if primary_theme == "Advanced Packaging":
+        if any(keyword in text_blob for keyword in ("fc-bga", "기판", "substrate")):
+            return "패키지기판"
+        if any(keyword in text_blob for keyword in ("cowos", "2.5d", "3d")):
+            return "첨단패키징"
+        return "패키징"
+
+    if primary_theme == "PCB":
+        if "fpcb" in text_blob:
+            return "FPCB"
+        if any(keyword in text_blob for keyword in ("fc-bga", "기판")):
+            return "PCB/기판"
+        return "PCB"
+
+    if primary_theme == "HBM":
+        if any(keyword in text_blob for keyword in ("dram", "메모리")):
+            return "메모리/HBM"
+        return "HBM"
+
+    if primary_theme == "AI Infrastructure":
+        if any(keyword in text_blob for keyword in ("데이터센터", "server", "서버")):
+            return "데이터센터"
+        if any(keyword in text_blob for keyword in ("gpu", "ai", "가속기")):
+            return "AI 인프라"
+        return "AI Infrastructure"
+
+    if primary_theme == "Telecom Dividend":
+        if "무선통신" in sector_text:
+            return "무선통신"
+        if "유선통신" in sector_text:
+            return "유선통신"
+        return "통신배당"
+
+    if primary_theme == "Brokerage / Holding":
+        if "지주" in sector_text or "지주" in text_blob:
+            return "지주"
+        if any(keyword in sector_text for keyword in ("증권", "자산운용")):
+            return "증권"
+        return "금융지주"
+
+    if primary_theme == "Banking / Insurance":
+        if "은행" in sector_text:
+            return "은행"
+        if "보험" in sector_text:
+            return "보험"
+        return "은행/보험"
+
+    if primary_theme == "Nonferrous / Metal Cycle":
+        if any(keyword in text_blob for keyword in ("아연", "구리", "니켈")):
+            return "비철금속"
+        if any(keyword in text_blob for keyword in ("특수강", "철강")):
+            return "철강"
+        return "금속"
+
+    if primary_theme == "Logistics / Export":
+        if any(keyword in text_blob for keyword in ("완성차 운반", "pcc", "자동차선")):
+            return "완성차물류"
+        if any(keyword in text_blob for keyword in ("포워딩", "해운")):
+            return "해운/포워딩"
+        return "물류"
+
+    if primary_theme == "Power Equipment":
+        if any(keyword in text_blob for keyword in ("변압기", "초고압")):
+            return "변압기"
+        return "전력기기"
+
+    if primary_theme == "K-Beauty":
+        if "odm" in text_blob:
+            return "화장품 ODM"
+        return "화장품"
+
+    if primary_theme == "Space / Satellite":
+        if any(keyword in text_blob for keyword in ("위성", "satellite")):
+            return "위성"
+        return "우주항공"
+
+    if primary_theme == "Healthcare Diagnostics":
+        if any(keyword in text_blob for keyword in ("체외진단", "분자진단")):
+            return "체외진단"
+        return "진단"
+
+    if primary_theme == "Industrial Automation":
+        if any(keyword in text_blob for keyword in ("로봇", "robot")):
+            return "로봇/자동화"
+        return "산업자동화"
+
+    return fallback_theme
 
 
 def _scale_component(value: float | None, positive_scale: float, negative_scale: float) -> float:
