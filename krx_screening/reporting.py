@@ -197,7 +197,7 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
             )
 
     bucket_summary = _aggregate_validation_rows(pd.DataFrame(bucket_rows), key="bucket")
-    theme_summary = _aggregate_validation_rows(pd.DataFrame(theme_rows), key="theme", min_count=2)
+    theme_summary = _aggregate_validation_rows(pd.DataFrame(theme_rows), key="theme", min_count=1)
     observations_frame = pd.DataFrame(observations).sort_values(by=["asof_date", "latest_return"], ascending=[False, False]).head(30)
 
     return {
@@ -292,6 +292,9 @@ def _build_validation_html(payload: dict[str, object]) -> str:
     bucket_table = bucket_summary.to_html(index=False, classes="data-table", border=0, justify="left") if not bucket_summary.empty else "<div class='empty'>데이터 없음</div>"
     theme_table = theme_summary.head(20).to_html(index=False, classes="data-table", border=0, justify="left") if not theme_summary.empty else "<div class='empty'>데이터 없음</div>"
     observation_table = observations.to_html(index=False, classes="data-table", border=0, justify="left") if not observations.empty else "<div class='empty'>데이터 없음</div>"
+    bucket_cards = _validation_stat_cards_html(bucket_summary, key_column="bucket")
+    theme_cards = _validation_stat_cards_html(theme_summary.head(10), key_column="theme")
+    metric_cards = _validation_metric_cards_html(bucket_summary, theme_summary)
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -322,12 +325,70 @@ def _build_validation_html(payload: dict[str, object]) -> str:
     }}
     .section {{ margin-top: 22px; background: rgba(255,255,255,0.82); border: 1px solid rgba(44,36,27,0.08); border-radius: 22px; padding: 22px; }}
     .section h2 {{ margin: 0 0 10px; font-size: 22px; }}
+    .stat-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }}
+    .stat-card {{
+      border-radius: 18px;
+      border: 1px solid rgba(44,36,27,0.08);
+      background: #fff;
+      padding: 16px;
+    }}
+    .stat-card strong {{
+      display: block;
+      font-size: 24px;
+      margin-top: 6px;
+    }}
+    .stat-card .label {{
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #8b7e71;
+      letter-spacing: 0.08em;
+    }}
+    .score-up {{ color: #0f766e; }}
+    .score-down {{ color: #b91c1c; }}
+    .score-flat {{ color: #6b6257; }}
+    .split-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 14px;
+    }}
+    .mini-card {{
+      border-radius: 18px;
+      border: 1px solid rgba(44,36,27,0.08);
+      background: #fffdf8;
+      padding: 18px;
+    }}
+    .mini-card h3 {{
+      margin: 0 0 10px;
+      font-size: 18px;
+    }}
+    .mini-list {{
+      margin: 0;
+      padding-left: 18px;
+      color: #3a3128;
+    }}
+    .mini-list li {{
+      margin-bottom: 8px;
+    }}
     .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     .data-table th, .data-table td {{ padding: 10px 12px; border-bottom: 1px solid rgba(44,36,27,0.08); text-align: left; }}
     .data-table th {{ background: #f3eadb; position: sticky; top: 0; }}
     .table-wrap {{ overflow: auto; }}
     .empty {{ color: #6b6257; }}
     a {{ color: #0f766e; text-decoration: none; }}
+    @media (max-width: 1000px) {{
+      .stat-grid, .split-grid {{ grid-template-columns: 1fr 1fr; }}
+    }}
+    @media (max-width: 720px) {{
+      .shell {{ width: min(100vw - 20px, 100%); margin: 12px auto 28px; }}
+      .hero, .section {{ padding: 18px; border-radius: 20px; }}
+      .stat-grid, .split-grid {{ grid-template-columns: 1fr; }}
+    }}
   </style>
 </head>
 <body>
@@ -342,6 +403,20 @@ def _build_validation_html(payload: dict[str, object]) -> str:
         <span class="chip">최신 기준 {escape(str(payload['latest_date']))}</span>
       </div>
       <p>{escape(str(payload['note']))}</p>
+      <div class="stat-grid">{metric_cards}</div>
+    </section>
+    <section class="section">
+      <h2>Quick Read</h2>
+      <div class="split-grid">
+        <div class="mini-card">
+          <h3>Bucket 상위/하위</h3>
+          {bucket_cards}
+        </div>
+        <div class="mini-card">
+          <h3>Theme 상위/하위</h3>
+          {theme_cards}
+        </div>
+      </div>
     </section>
     <section class="section">
       <h2>Bucket Validation</h2>
@@ -358,6 +433,82 @@ def _build_validation_html(payload: dict[str, object]) -> str:
     </div>
 </body>
 </html>"""
+
+
+def _validation_metric_cards_html(bucket_summary: pd.DataFrame, theme_summary: pd.DataFrame) -> str:
+    cards: list[tuple[str, str, str]] = []
+    best_bucket = _best_validation_row(bucket_summary)
+    worst_bucket = _worst_validation_row(bucket_summary)
+    best_theme = _best_validation_row(theme_summary)
+    total_themes = str(len(theme_summary.index)) if not theme_summary.empty else "0"
+
+    if best_bucket is not None:
+        cards.append(("Best Bucket", str(best_bucket.iloc[0]), _fmt_signed(best_bucket.get("latest_outperformance"))))
+    if worst_bucket is not None:
+        cards.append(("Weakest Bucket", str(worst_bucket.iloc[0]), _fmt_signed(worst_bucket.get("latest_outperformance"))))
+    if best_theme is not None:
+        cards.append(("Best Theme", str(best_theme.iloc[0]), _fmt_signed(best_theme.get("latest_outperformance"))))
+    cards.append(("Tracked Themes", total_themes, "관측 테마 수"))
+
+    rendered = []
+    for label, primary, secondary in cards:
+        cls = "score-flat"
+        if secondary.startswith("+"):
+            cls = "score-up"
+        elif secondary.startswith("-"):
+            cls = "score-down"
+        rendered.append(
+            f'<article class="stat-card"><span class="label">{escape(label)}</span><strong>{escape(primary)}</strong><span class="{cls}">{escape(secondary)}</span></article>'
+        )
+    return "".join(rendered)
+
+
+def _validation_stat_cards_html(frame: pd.DataFrame, key_column: str) -> str:
+    if frame.empty:
+        return "<div class='empty'>데이터 없음</div>"
+    best = _best_validation_row(frame)
+    worst = _worst_validation_row(frame)
+    items: list[str] = []
+    if best is not None:
+        items.append(
+            f"<div><strong>상위</strong><ol class='mini-list'><li>{escape(str(best.iloc[0]))} · 초과수익 {escape(_fmt_signed(best.get('latest_outperformance')))} · 적중률 {escape(_fmt_percent(best.get('latest_hit_rate')))}</li></ol></div>"
+        )
+    if worst is not None and (best is None or str(best.iloc[0]) != str(worst.iloc[0])):
+        items.append(
+            f"<div style='margin-top:12px;'><strong>하위</strong><ol class='mini-list'><li>{escape(str(worst.iloc[0]))} · 초과수익 {escape(_fmt_signed(worst.get('latest_outperformance')))} · 적중률 {escape(_fmt_percent(worst.get('latest_hit_rate')))}</li></ol></div>"
+        )
+    top_rows = frame.head(3)
+    extra = [
+        f"<li>{escape(str(getattr(row, key_column)))} · 최신수익률 {escape(_fmt_signed(getattr(row, 'latest_return', None)))} · 관측 {escape(str(int(getattr(row, 'observations', 0))))}회</li>"
+        for row in top_rows.itertuples(index=False)
+    ]
+    items.append(f"<div style='margin-top:12px;'><strong>Top 3</strong><ol class='mini-list'>{''.join(extra)}</ol></div>")
+    return "".join(items)
+
+
+def _best_validation_row(frame: pd.DataFrame) -> pd.Series | None:
+    if frame.empty:
+        return None
+    return frame.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[False, False, False]).iloc[0]
+
+
+def _worst_validation_row(frame: pd.DataFrame) -> pd.Series | None:
+    if frame.empty:
+        return None
+    return frame.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[True, True, False]).iloc[0]
+
+
+def _fmt_signed(value: object) -> str:
+    numeric = _num(value)
+    if numeric == 0:
+        return "0.0%"
+    sign = "+" if numeric > 0 else ""
+    return f"{sign}{numeric:.1f}%"
+
+
+def _fmt_percent(value: object) -> str:
+    numeric = _num(value)
+    return f"{numeric:.1f}%"
 
 
 def _frame_to_markdown_table(frame: pd.DataFrame) -> str:
