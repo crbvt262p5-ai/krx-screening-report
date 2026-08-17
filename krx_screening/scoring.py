@@ -113,6 +113,57 @@ THEME_PROFILES = {
         "industry_keywords": ("자동화", "로봇", "fa", "스마트팩토리"),
         "min_score": 5.5,
     },
+    "Automotive Components": {
+        "keywords": ("자동차부품", "램프", "샤시", "전장", "모듈", "브레이크", "조향", "차체"),
+        "sector_keywords": ("자동차", "운송", "기계"),
+        "industry_keywords": ("자동차부품", "전장", "램프", "모듈"),
+        "min_score": 5.0,
+    },
+    "Semiconductor Materials": {
+        "keywords": ("반도체 소재", "식각", "포토", "CMP", "슬러리", "세정", "프리커서", "특수가스"),
+        "sector_keywords": ("화학", "반도체", "전자"),
+        "industry_keywords": ("반도체", "전자", "화학"),
+        "min_score": 5.3,
+    },
+    "Telecom Dividend": {
+        "keywords": ("무선통신", "통신", "5g", "b2b", "데이터센터", "배당"),
+        "sector_keywords": ("통신",),
+        "industry_keywords": ("무선통신", "유선통신", "통신서비스"),
+        "min_score": 4.8,
+    },
+    "Brokerage / Holding": {
+        "keywords": ("증권", "자본시장", "브로커리지", "ib", "지주", "밸류업", "배당"),
+        "sector_keywords": ("금융", "증권"),
+        "industry_keywords": ("증권", "지주", "자산운용"),
+        "min_score": 4.8,
+    },
+    "Banking / Insurance": {
+        "keywords": ("은행", "상업은행", "보험", "손해보험", "생명보험", "주주환원", "배당"),
+        "sector_keywords": ("은행", "보험", "금융"),
+        "industry_keywords": ("상업은행", "보험", "손해보험", "생명보험"),
+        "min_score": 4.8,
+    },
+    "Nonferrous / Metal Cycle": {
+        "keywords": ("비철", "아연", "구리", "금속", "제련", "철강", "특수강"),
+        "sector_keywords": ("금속", "철강"),
+        "industry_keywords": ("금속", "철강", "제련"),
+        "min_score": 4.9,
+    },
+    "Logistics / Export": {
+        "keywords": ("물류", "해운", "운송", "포워딩", "완성차 운반", "수출"),
+        "sector_keywords": ("운송", "서비스"),
+        "industry_keywords": ("물류", "해운", "운송"),
+        "min_score": 4.9,
+    },
+}
+
+RELAXED_CONFIRMATION_THEMES = {
+    "Automotive Components",
+    "Telecom Dividend",
+    "Brokerage / Holding",
+    "Banking / Insurance",
+    "Nonferrous / Metal Cycle",
+    "Logistics / Export",
 }
 
 
@@ -1598,6 +1649,9 @@ def _classify_theme(equity: EquitySnapshot) -> None:
     liquidity_ok = reference >= 3_000_000_000
     scale_ok = market_cap >= 100_000_000_000
     external_confirmation = any(item.startswith(("뉴스 확인", "공시 확인")) for item in best_evidence)
+    relaxed_confirmation = best_theme in RELAXED_CONFIRMATION_THEMES and (
+        len(sector_hits) + len(industry_hits) >= 2
+    )
     tech_theme = best_theme in {
         "AI Infrastructure",
         "HBM",
@@ -1617,7 +1671,7 @@ def _classify_theme(equity: EquitySnapshot) -> None:
     gate_pass = (
         best_score >= profile["min_score"]
         and evidence_count >= 2
-        and (external_confirmation or evidence_count >= 3)
+        and (external_confirmation or evidence_count >= 3 or relaxed_confirmation)
         and liquidity_ok
         and scale_ok
         and quality_ok
