@@ -331,6 +331,7 @@ def _build_html(
     spotlight_html = _spotlight_strip(value_top, growth_top, leader_top)
     portfolio_html = _portfolio_section_html(portfolio)
     universe_json = json.dumps(_records_for_ui(full_list), ensure_ascii=False)
+    explorer_theme_chips = _explorer_theme_chips_html(full_list)
     value_table = _html_table(value_top, bucket="value")
     growth_table = _html_table(growth_top, bucket="growth")
     summary_html = "".join(
@@ -1190,6 +1191,7 @@ def _build_html(
               <span class="chip">정렬 기준 최종점수</span>
               <span class="chip">기본값은 실매수·관찰·경고만 표시</span>
             </div>
+            <div class="chip-row" id="themeQuickFilters">{explorer_theme_chips}</div>
             <div class="controls">
               <input id="searchInput" type="search" placeholder="종목명 또는 티커 검색">
               <select id="bucketFilter">
@@ -1212,6 +1214,12 @@ def _build_html(
                 <option value="후반">후반</option>
                 <option value="과열">과열</option>
               </select>
+              <select id="themeFilter">
+                <option value="">테마 전체</option>
+              </select>
+              <select id="subThemeFilter">
+                <option value="">하위테마 전체</option>
+              </select>
             </div>
             <div class="table-wrap">
               <table>
@@ -1220,7 +1228,7 @@ def _build_html(
                     <th>종목</th>
                     <th>시장</th>
                     <th>업종</th>
-                    <th>테마</th>
+                    <th>테마 / 하위테마</th>
                     <th>신뢰도</th>
                     <th>시총구간</th>
                     <th>전일 종가</th>
@@ -1263,10 +1271,13 @@ def _build_html(
     const bucketFilter = document.getElementById("bucketFilter");
     const marketFilter = document.getElementById("marketFilter");
     const stageFilter = document.getElementById("stageFilter");
+    const themeFilter = document.getElementById("themeFilter");
+    const subThemeFilter = document.getElementById("subThemeFilter");
     const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
     const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
     const subtabButtons = Array.from(document.querySelectorAll("[data-subtab-group]"));
     const subtabPanels = Array.from(document.querySelectorAll("[data-subtab-panel]"));
+    const themeQuickButtons = Array.from(document.querySelectorAll("[data-theme-filter]"));
 
     function activateTab(tabName, updateHash = false) {{
       tabButtons.forEach((button) => {{
@@ -1322,11 +1333,31 @@ def _build_html(
       return row.ticker ? `#detail-${{row.ticker}}` : "#detail-deck";
     }}
 
+    function populateThemeFilters() {{
+      const themes = Array.from(new Set(universeRows.map((row) => row.theme || "미분류"))).sort((a, b) => a.localeCompare(b, "ko"));
+      const subThemes = Array.from(
+        new Set(
+          universeRows
+            .map((row) => row.sub_theme || "")
+            .filter((value) => value)
+        )
+      ).sort((a, b) => a.localeCompare(b, "ko"));
+
+      themeFilter.innerHTML = ['<option value="">테마 전체</option>']
+        .concat(themes.map((theme) => `<option value="${{theme}}">${{theme}}</option>`))
+        .join("");
+      subThemeFilter.innerHTML = ['<option value="">하위테마 전체</option>']
+        .concat(subThemes.map((theme) => `<option value="${{theme}}">${{theme}}</option>`))
+        .join("");
+    }}
+
     function renderUniverse() {{
       const q = searchInput.value.trim().toLowerCase();
       const bucket = bucketFilter.value;
       const market = marketFilter.value;
       const stage = stageFilter.value;
+      const theme = themeFilter.value;
+      const subTheme = subThemeFilter.value;
       const filtered = universeRows.filter((row) => {{
         const matchQuery = !q || `${{row.name}} ${{row.ticker}}`.toLowerCase().includes(q);
         const matchBucket =
@@ -1345,7 +1376,9 @@ def _build_html(
           );
         const matchMarket = !market || row.market === market;
         const matchStage = !stage || row.stage === stage;
-        return matchQuery && matchBucket && matchMarket && matchStage;
+        const matchTheme = !theme || (row.theme || "미분류") === theme;
+        const matchSubTheme = !subTheme || (row.sub_theme || "") === subTheme;
+        return matchQuery && matchBucket && matchMarket && matchStage && matchTheme && matchSubTheme;
       }});
 
       body.innerHTML = filtered.map((row) => `
@@ -1353,7 +1386,7 @@ def _build_html(
           <td><strong><a class="stock-link" href="${{detailHref(row)}}">${{row.name}}</a></strong><div class="subtle">${{row.ticker}}</div></td>
           <td>${{row.market || "-"}}</td>
           <td>${{row.sector || "-"}}</td>
-          <td>${{row.theme || "미분류"}}</td>
+          <td><strong>${{row.theme || "미분류"}}</strong><div class="subtle">${{row.sub_theme || "-"}}</div></td>
           <td>${{row.theme_confidence || "-"}}</td>
           <td>${{row.size_bucket || "-"}}</td>
           <td>${{fmt(row.prev_close)}}</td>
@@ -1380,6 +1413,18 @@ def _build_html(
     bucketFilter.addEventListener("change", renderUniverse);
     marketFilter.addEventListener("change", renderUniverse);
     stageFilter.addEventListener("change", renderUniverse);
+    themeFilter.addEventListener("change", renderUniverse);
+    subThemeFilter.addEventListener("change", renderUniverse);
+    themeQuickButtons.forEach((button) => {{
+      button.addEventListener("click", () => {{
+        const theme = button.getAttribute("data-theme-filter") || "";
+        themeFilter.value = theme;
+        subThemeFilter.value = "";
+        activateTab("detail", false);
+        activateSubtab("detail", "explorer");
+        renderUniverse();
+      }});
+    }});
     tabButtons.forEach((button) => {{
       button.addEventListener("click", () => activateTab(button.dataset.tab, true));
     }});
@@ -1414,6 +1459,7 @@ def _build_html(
     if (window.location.hash.startsWith("#keyword-lenses")) activateSubtab("keywords", "lenses");
     if (window.location.hash.startsWith("#keyword-tables")) activateSubtab("keywords", "tables");
     if (window.location.hash.startsWith("#keyword-health")) activateSubtab("keywords", "health");
+    populateThemeFilters();
     renderUniverse();
   </script>
 </body>
@@ -3205,6 +3251,26 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "repeat_top_count",
     ]
     return frame.reindex(columns=columns, fill_value="").to_dict(orient="records")
+
+
+def _explorer_theme_chips_html(frame: pd.DataFrame, limit: int = 8) -> str:
+    if frame.empty or "theme" not in frame.columns:
+        return ""
+    working = frame.copy()
+    working["theme"] = working["theme"].fillna("미분류").replace("", "미분류")
+    ranked = (
+        working[working["theme"] != "미분류"]["theme"]
+        .value_counts()
+        .head(limit)
+    )
+    chips = [
+        '<button class="jump-link" type="button" data-theme-filter="">전체</button>'
+    ]
+    chips.extend(
+        f'<button class="jump-link" type="button" data-theme-filter="{escape(str(theme))}">{escape(str(theme))} {int(count)}</button>'
+        for theme, count in ranked.items()
+    )
+    return "".join(chips)
 
 
 def _issue_focus_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
