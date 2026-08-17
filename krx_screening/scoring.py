@@ -34,6 +34,87 @@ TAM_THEME_ALIASES = {
     "Industrial Automation": ("automation", "산업자동화", "factory automation", "fa", "robotics", "로봇"),
 }
 
+THEME_PROFILES = {
+    "AI Infrastructure": {
+        "keywords": ("ai", "gpu", "데이터센터", "server", "infra", "가속기"),
+        "sector_keywords": ("반도체", "전자", "전기전자", "it"),
+        "industry_keywords": ("서버", "데이터센터", "가속기", "ai"),
+        "min_score": 6.0,
+    },
+    "HBM": {
+        "keywords": ("hbm", "고대역폭메모리", "dram", "memory", "메모리"),
+        "sector_keywords": ("반도체", "전자"),
+        "industry_keywords": ("메모리", "dram", "반도체"),
+        "min_score": 6.0,
+    },
+    "Advanced Packaging": {
+        "keywords": ("advanced packaging", "첨단패키징", "패키징", "fc-bga", "cowos", "반도체기판"),
+        "sector_keywords": ("반도체", "전자", "it"),
+        "industry_keywords": ("패키징", "기판", "pcb", "fc-bga"),
+        "min_score": 6.0,
+    },
+    "PCB": {
+        "keywords": ("pcb", "fpcb", "기판"),
+        "sector_keywords": ("전자", "반도체"),
+        "industry_keywords": ("pcb", "fpcb", "기판"),
+        "min_score": 5.5,
+    },
+    "Optical Communication": {
+        "keywords": ("optical", "광통신", "광모듈", "transceiver", "실리콘포토닉스"),
+        "sector_keywords": ("통신", "전자"),
+        "industry_keywords": ("광", "통신", "모듈"),
+        "min_score": 5.5,
+    },
+    "Power Equipment": {
+        "keywords": ("power equipment", "전력기기", "변압기", "배전", "송전", "초고압"),
+        "sector_keywords": ("전기", "기계", "중공업"),
+        "industry_keywords": ("전력", "변압기", "배전", "송전"),
+        "min_score": 5.5,
+    },
+    "Data Center Cooling": {
+        "keywords": ("cooling", "냉각", "액침", "thermal", "열관리"),
+        "sector_keywords": ("기계", "전자", "화학"),
+        "industry_keywords": ("냉각", "열관리", "hvac"),
+        "min_score": 5.5,
+    },
+    "Defense": {
+        "keywords": ("defense", "방산", "미사일", "탄약", "군수", "레이더"),
+        "sector_keywords": ("기계", "항공", "우주"),
+        "industry_keywords": ("방산", "항공", "군수"),
+        "min_score": 5.5,
+    },
+    "Shipbuilding": {
+        "keywords": ("shipbuilding", "조선", "lng선", "선박", "해양플랜트"),
+        "sector_keywords": ("조선", "기계", "중공업"),
+        "industry_keywords": ("조선", "선박", "해양"),
+        "min_score": 5.5,
+    },
+    "K-Beauty": {
+        "keywords": ("k-beauty", "beauty", "화장품", "cosmetic", "odm", "브랜드"),
+        "sector_keywords": ("화장품", "생활용품", "소비재"),
+        "industry_keywords": ("화장품", "미용", "odm", "cosmetic"),
+        "min_score": 5.5,
+    },
+    "Space / Satellite": {
+        "keywords": ("space", "satellite", "우주", "위성", "발사체", "안테나"),
+        "sector_keywords": ("항공", "우주", "통신"),
+        "industry_keywords": ("위성", "우주", "항공"),
+        "min_score": 5.5,
+    },
+    "Healthcare Diagnostics": {
+        "keywords": ("diagnostics", "진단", "분자진단", "체외진단", "시약"),
+        "sector_keywords": ("의료", "헬스케어", "제약"),
+        "industry_keywords": ("진단", "의료기기", "체외진단"),
+        "min_score": 5.5,
+    },
+    "Industrial Automation": {
+        "keywords": ("automation", "산업자동화", "factory automation", "fa", "robotics", "로봇", "스마트팩토리"),
+        "sector_keywords": ("기계", "전자", "산업재"),
+        "industry_keywords": ("자동화", "로봇", "fa", "스마트팩토리"),
+        "min_score": 5.5,
+    },
+}
+
 
 def score_equities(equities: list[EquitySnapshot]) -> None:
     for equity in equities:
@@ -48,6 +129,7 @@ def score_equities(equities: list[EquitySnapshot]) -> None:
     _score_leader_cycle(equities)
     _score_missed_leader_detector(equities)
     for equity in equities:
+        _classify_theme(equity)
         _score_rerating_signals(equity)
         _apply_dividend_event_tags(equity)
         _apply_weak_profit_sector_penalty(equity)
@@ -382,6 +464,10 @@ def _score_rerating_signals(equity: EquitySnapshot) -> None:
         tam_expansion += max(theme_scores)
         if len(theme_scores) >= 2:
             tam_expansion += min(3.0, (sum(sorted(theme_scores, reverse=True)[1:3]) * 0.25))
+    if equity.theme_gate_pass and equity.theme_score >= 8.0:
+        tam_expansion += 1.0
+    elif not equity.theme_gate_pass and matched_themes:
+        tam_expansion -= 1.2
     if sales_change >= 30:
         tam_expansion += 1.0
     if _is_uptrend(equity.sales_3y):
@@ -1102,6 +1188,18 @@ def _effective_dividend_yield(equity: EquitySnapshot) -> float | None:
     return equity.dividend_yield
 
 
+def _theme_text_blob(equity: EquitySnapshot) -> str:
+    parts = [
+        equity.name or "",
+        equity.sector or "",
+        equity.industry or "",
+        " ".join(equity.news_keyword_hits),
+        " ".join(equity.important_news_items),
+        " ".join(equity.important_disclosures),
+    ]
+    return " ".join(filter(None, parts)).lower()
+
+
 def _has_any_keyword(equity: EquitySnapshot, *keywords: str) -> bool:
     hits = {item.lower() for item in equity.news_keyword_hits}
     return any(keyword.lower() in hits for keyword in keywords)
@@ -1348,20 +1446,17 @@ def _score_leader_cycle(equities: list[EquitySnapshot]) -> None:
 
 
 def _matched_tam_themes(equity: EquitySnapshot) -> list[str]:
-    label_text = " ".join(
-        filter(
-            None,
-            [
-                equity.name or "",
-                equity.sector or "",
-                equity.industry or "",
-                " ".join(equity.news_keyword_hits),
-            ],
-        )
-    ).lower()
+    if equity.theme_gate_pass and equity.theme:
+        matches = [equity.theme]
+        if equity.sub_theme and equity.sub_theme != equity.theme:
+            matches.append(equity.sub_theme)
+        return [theme for theme in matches if theme in TAM_THEME_CAGR]
+
+    label_text = _theme_text_blob(equity)
     matched: list[str] = []
     for theme, aliases in TAM_THEME_ALIASES.items():
-        if any(alias.lower() in label_text for alias in aliases):
+        hits = sum(1 for alias in aliases if alias.lower() in label_text)
+        if hits >= 2:
             matched.append(theme)
     return matched
 
@@ -1424,9 +1519,136 @@ def _fails_minimum_gateway(equity: EquitySnapshot) -> bool:
         return True
     if speculative_theme and reference < 10_000_000_000:
         return True
+    if equity.theme and not equity.theme_gate_pass and equity.tam_expansion_score >= 6.0 and market_cap < 300_000_000_000:
+        return True
     if "가치 함정 주의" in equity.tags and weak_quality and market_cap < 300_000_000_000:
         return True
     return False
+
+
+def _classify_theme(equity: EquitySnapshot) -> None:
+    text_blob = _theme_text_blob(equity)
+    news_text = " ".join(equity.important_news_items).lower()
+    disclosure_text = " ".join(equity.important_disclosures).lower()
+    sector_text = " ".join(filter(None, [equity.sector or "", equity.industry or ""])).lower()
+    scored: list[tuple[float, str, list[str], list[str]]] = []
+
+    for theme, profile in THEME_PROFILES.items():
+        score = 0.0
+        evidence: list[str] = []
+        raw_hits: list[str] = []
+
+        sector_hits = [keyword for keyword in profile["sector_keywords"] if keyword.lower() in sector_text]
+        if sector_hits:
+            score += 2.6 + min(1.0, (len(sector_hits) - 1) * 0.4)
+            evidence.append(f"업종 정합: {', '.join(sector_hits[:2])}")
+            raw_hits.extend(sector_hits[:2])
+
+        industry_hits = [keyword for keyword in profile["industry_keywords"] if keyword.lower() in sector_text]
+        if industry_hits:
+            score += 2.8 + min(1.2, (len(industry_hits) - 1) * 0.5)
+            evidence.append(f"세부 산업: {', '.join(industry_hits[:2])}")
+            raw_hits.extend(industry_hits[:2])
+
+        keyword_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in text_blob]
+        if keyword_hits:
+            keyword_score = min(4.2, 1.6 + len(keyword_hits) * 0.95)
+            score += keyword_score
+            evidence.append(f"키워드 근거: {', '.join(keyword_hits[:3])}")
+            raw_hits.extend(keyword_hits[:3])
+
+        news_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in news_text]
+        if news_hits:
+            score += min(2.2, 1.0 + len(news_hits) * 0.4)
+            evidence.append(f"뉴스 확인: {', '.join(news_hits[:2])}")
+            raw_hits.extend(news_hits[:2])
+
+        disclosure_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in disclosure_text]
+        if disclosure_hits:
+            score += min(2.0, 1.0 + len(disclosure_hits) * 0.35)
+            evidence.append(f"공시 확인: {', '.join(disclosure_hits[:2])}")
+            raw_hits.extend(disclosure_hits[:2])
+
+        if score > 0:
+            scored.append((round(score, 2), theme, evidence, raw_hits))
+
+    if not scored:
+        equity.theme = "미분류"
+        equity.sub_theme = ""
+        equity.theme_score = 0.0
+        equity.theme_confidence = "낮음"
+        equity.theme_gate_pass = False
+        equity.theme_evidence = ["테마 근거 부족"]
+        return
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_theme, best_evidence, best_hits = scored[0]
+    second_theme = scored[1][1] if len(scored) > 1 and scored[1][0] >= max(5.0, best_score - 1.2) else ""
+    profile = THEME_PROFILES[best_theme]
+    sector_hits = [keyword for keyword in profile["sector_keywords"] if keyword.lower() in sector_text]
+    industry_hits = [keyword for keyword in profile["industry_keywords"] if keyword.lower() in sector_text]
+    keyword_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in text_blob]
+    news_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in news_text]
+    disclosure_hits = [keyword for keyword in profile["keywords"] if keyword.lower() in disclosure_text]
+
+    evidence_count = len(best_hits)
+    reference = equity.avg_trading_value_20d or equity.avg_trading_value_60d or 0.0
+    market_cap = equity.market_cap or 0.0
+    quality_ok = equity.business_quality_score >= 3.8
+    liquidity_ok = reference >= 3_000_000_000
+    scale_ok = market_cap >= 100_000_000_000
+    external_confirmation = any(item.startswith(("뉴스 확인", "공시 확인")) for item in best_evidence)
+    tech_theme = best_theme in {
+        "AI Infrastructure",
+        "HBM",
+        "Advanced Packaging",
+        "PCB",
+        "Optical Communication",
+        "Data Center Cooling",
+        "Industrial Automation",
+    }
+    weak_structural_fit = (
+        tech_theme
+        and not industry_hits
+        and len(keyword_hits) <= 1
+        and len(news_hits) + len(disclosure_hits) <= 1
+    )
+
+    gate_pass = (
+        best_score >= profile["min_score"]
+        and evidence_count >= 2
+        and (external_confirmation or evidence_count >= 3)
+        and liquidity_ok
+        and scale_ok
+        and quality_ok
+        and not weak_structural_fit
+    )
+    if best_theme in {"K-Beauty", "Shipbuilding", "Defense", "Power Equipment"} and best_score >= 6.0:
+        gate_pass = gate_pass or (liquidity_ok and scale_ok and quality_ok and evidence_count >= 2)
+
+    if gate_pass:
+        equity.theme = best_theme
+        equity.sub_theme = second_theme
+        equity.theme_score = best_score
+        equity.theme_gate_pass = True
+        equity.theme_confidence = "높음" if best_score >= 8.5 and evidence_count >= 3 else "중간"
+        equity.theme_evidence = best_evidence[:4]
+    else:
+        equity.theme = "미분류"
+        equity.sub_theme = ""
+        equity.theme_score = best_score
+        equity.theme_gate_pass = False
+        equity.theme_confidence = "낮음"
+        failure_reasons = []
+        if not liquidity_ok:
+            failure_reasons.append("거래대금 부족")
+        if not scale_ok:
+            failure_reasons.append("시가총액 부족")
+        if not quality_ok:
+            failure_reasons.append("사업체력 부족")
+        if not external_confirmation and evidence_count < 3:
+            failure_reasons.append("외부 확인 부족")
+        equity.theme_evidence = best_evidence[:3] + [f"테마 보류: {', '.join(failure_reasons[:2]) or '근거 부족'}"]
 
 
 def _scale_component(value: float | None, positive_scale: float, negative_scale: float) -> float:

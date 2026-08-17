@@ -84,6 +84,12 @@ class EquitySnapshot:
     important_disclosures: list[str] = field(default_factory=list)
     missing_data: list[str] = field(default_factory=list)
     source_notes: list[str] = field(default_factory=list)
+    theme: str | None = None
+    sub_theme: str | None = None
+    theme_score: float = 0.0
+    theme_confidence: str | None = None
+    theme_gate_pass: bool = False
+    theme_evidence: list[str] = field(default_factory=list)
     excluded: bool = False
     exclusion_reasons: list[str] = field(default_factory=list)
     pass_reasons: list[str] = field(default_factory=list)
@@ -203,6 +209,12 @@ class EquitySnapshot:
             "news_keyword_hits": "|".join(self.news_keyword_hits),
             "important_news_items": " | ".join(self.important_news_items),
             "important_disclosures": " | ".join(self.important_disclosures),
+            "theme": self.theme,
+            "sub_theme": self.sub_theme,
+            "theme_score": self.theme_score,
+            "theme_confidence": self.theme_confidence,
+            "theme_gate_pass": self.theme_gate_pass,
+            "theme_evidence": " | ".join(self.theme_evidence),
             "value_score": self.value_score,
             "growth_early_score": self.growth_early_score,
             "dividend_potential_score": self.dividend_potential_score,

@@ -1220,6 +1220,8 @@ def _build_html(
                     <th>종목</th>
                     <th>시장</th>
                     <th>업종</th>
+                    <th>테마</th>
+                    <th>신뢰도</th>
                     <th>시총구간</th>
                     <th>전일 종가</th>
                     <th>PER</th>
@@ -1351,6 +1353,8 @@ def _build_html(
           <td><strong><a class="stock-link" href="${{detailHref(row)}}">${{row.name}}</a></strong><div class="subtle">${{row.ticker}}</div></td>
           <td>${{row.market || "-"}}</td>
           <td>${{row.sector || "-"}}</td>
+          <td>${{row.theme || "미분류"}}</td>
+          <td>${{row.theme_confidence || "-"}}</td>
           <td>${{row.size_bucket || "-"}}</td>
           <td>${{fmt(row.prev_close)}}</td>
           <td>${{fmt(row.per)}}</td>
@@ -1444,6 +1448,12 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ("final_score", 0),
         ("important_news_items", ""),
         ("important_disclosures", ""),
+        ("theme", "미분류"),
+        ("sub_theme", ""),
+        ("theme_score", 0),
+        ("theme_confidence", "낮음"),
+        ("theme_gate_pass", False),
+        ("theme_evidence", ""),
         ("recommendation_bucket", ""),
         ("core_bucket", ""),
         ("leader_bucket", ""),
@@ -2759,6 +2769,7 @@ def _detail_deck_html(frame: pd.DataFrame) -> str:
                 </div>
               </div>
               <div class="detail-facts">
+                <div>테마<strong>{escape(str(getattr(row, 'theme', '미분류') or '미분류'))}</strong></div>
                 <div>최종점수<strong>{escape(_fmt_cell(getattr(row, 'final_score', None)))}</strong></div>
                 <div>PER / PBR<strong>{escape(_fmt_cell(getattr(row, 'per', None)))}/{escape(_fmt_cell(getattr(row, 'pbr', None)))}</strong></div>
                 <div>6M 수익률<strong>{escape(_fmt_cell(getattr(row, 'returns_6m_pct', None)))}%</strong></div>
@@ -2768,7 +2779,9 @@ def _detail_deck_html(frame: pd.DataFrame) -> str:
               </div>
               <div class="memo-summary" style="margin-top:14px;">{escape(_memo_caution(row))}</div>
               <div class="memo-summary">{escape(_bucket_metric_line(row))}</div>
+              <div class="memo-summary">{escape(_theme_metric_line(row))}</div>
               {f'<div class="issue-line"><strong>이슈</strong> {escape(issue_text)}</div>' if issue_text else ''}
+              {f'<div class="issue-line"><strong>테마 근거</strong> {escape(_theme_evidence_line(row))}</div>' if _theme_evidence_line(row) else ''}
               <ol class="reason-list">{''.join(f'<li>{escape(reason)}</li>' for reason in reasons[:4])}</ol>
             </article>
             """
@@ -2828,6 +2841,7 @@ def _memo_grid(frame: pd.DataFrame, title: str, tone: str) -> str:
               </div>
               <div class="memo-summary">{escape(caution)}</div>
               <div class="memo-summary">{escape(metric_line)}</div>
+              <div class="memo-summary">{escape(_theme_metric_line(row))}</div>
               {f'<div class="memo-summary">중요 이슈: {escape(issue_text)}</div>' if issue_text else ''}
               <ul class="memo-points">{''.join(f'<li>{escape(reason)}</li>' for reason in reasons)}</ul>
             </article>
@@ -2905,6 +2919,27 @@ def _memo_caution(row: object) -> str:
     return "지금은 점수보다 실제 투자 가능성 기준으로 상단에 남은 후보입니다."
 
 
+def _theme_metric_line(row: object) -> str:
+    theme = str(getattr(row, "theme", "") or "").strip() or "미분류"
+    sub_theme = str(getattr(row, "sub_theme", "") or "").strip()
+    theme_score = getattr(row, "theme_score", None)
+    confidence = str(getattr(row, "theme_confidence", "") or "").strip() or "낮음"
+    gate_pass = bool(getattr(row, "theme_gate_pass", False))
+    label = theme if not sub_theme or sub_theme == theme else f"{theme} / {sub_theme}"
+    return (
+        f"테마 {label} | 적합도 {_fmt_cell(theme_score)} | 신뢰도 {confidence} | "
+        f"{'테마 확정' if gate_pass else '테마 보류'}"
+    )
+
+
+def _theme_evidence_line(row: object) -> str:
+    explicit = str(getattr(row, "theme_evidence", "") or "").strip()
+    if not explicit:
+        return ""
+    evidence = [item.strip() for item in explicit.split("|") if item.strip()]
+    return " / ".join(evidence[:4])
+
+
 def _bucket_metric_line(row: object) -> str:
     turnover_raw = getattr(row, "avg_trading_value_20d", None)
     turnover = _fmt_amount_short(turnover_raw)
@@ -2935,6 +2970,7 @@ def _bucket_definitions_markdown() -> str:
         "- `Value Conviction`: `PER <= 20` 또는 `PBR <= 1.5` 또는 업종 할인 20% 이상, 사업체력/현금흐름 양호.",
         "- `Growth Conviction`: `Growth Proven`, `estimate_revision >= 3.0`, `business >= 5.0`, `cashflow >= 1.0`, `stage != 과열`, 고PER면 정당화 태그 필요.",
         "- `정배열 추세`: `종가 >= 20일선 >= 60일선 >= 120일선`이면 `조기매도 경계` 또는 `추세 유지` 태그를 붙여, 가치 해소 뒤에도 추세 지속 여부를 확인합니다.",
+        "- `테마 판정`: 업종명만으로 붙이지 않습니다. 업종/세부산업 + 뉴스/공시 + 체급/유동성 게이트를 통과해야 확정되고, 아니면 `미분류` 또는 `테마 보류`로 둡니다.",
         "- `소액 관찰`: 논리는 유지되지만 유동성/체급/투자가능성 중 일부 부족. 보통 `최종점수 >= 22`, `business >= 3.8`, `cashflow >= 0`.",
         "- `보류`: 재평가 신호는 있으나 핵심 게이트 일부 미달. 상단 추천보다는 추가 검증 대상입니다.",
         "- `가치함정 경고`: `value_trap_risk` 높거나 거버넌스 할인 의심. 싸 보여도 할인 이유 먼저 확인.",
@@ -2981,6 +3017,17 @@ def _bucket_definitions_html() -> str:
             ],
         ),
         (
+            "테마 판정",
+            "테마는 업종명만으로 붙이지 않고 업종, 뉴스, 공시, 키워드, 체급 게이트를 함께 확인한 뒤에만 확정합니다.",
+            [
+                "업종/세부산업 키워드 확인",
+                "뉴스 또는 공시로 외부 확인",
+                "시총·거래대금 최소 게이트",
+                "사업체력 부족 시 미분류",
+                "증거 약하면 테마 보류",
+            ],
+        ),
+        (
             "소액 관찰 / 경고 / 제외",
             "논리는 있으나 유동성이나 구조가 약하거나, 싸 보여도 할인 이유가 의심되는 그룹입니다.",
             [
@@ -3020,10 +3067,15 @@ def _recommendation_reasons(row: object) -> list[str]:
         reasons.append(f"최근 영업이익/순이익 컨센서스가 개선되고 있습니다.")
 
     tam = getattr(row, "tam_expansion_score", 0) or 0
-    if tam >= 10:
-        reasons.append(f"{name}이 속한 산업의 글로벌 TAM 확대 가능성이 큽니다.")
+    theme = str(getattr(row, "theme", "") or "").strip()
+    theme_gate_pass = bool(getattr(row, "theme_gate_pass", False))
+    evidence = _theme_evidence_line(row)
+    if tam >= 10 and theme_gate_pass and theme and theme != "미분류":
+        reasons.append(f"{name}은 {theme} 테마 근거가 확인돼 산업 TAM 확대 수혜 후보로 분류했습니다.")
+    elif tam >= 6 and theme_gate_pass and theme and theme != "미분류":
+        reasons.append(f"{theme} 관련 수요 확장 신호가 점수에 반영됐습니다.")
     elif tam >= 6:
-        reasons.append("산업 성장률과 수요 확장 신호가 유의미합니다.")
+        reasons.append("산업 성장률과 수요 확장 신호가 유의미하지만, 테마 증거는 추가 확인이 필요합니다.")
 
     valuation = getattr(row, "valuation_score", 0) or 0
     per = getattr(row, "per", None)
@@ -3068,6 +3120,8 @@ def _recommendation_reasons(row: object) -> list[str]:
 
     if not reasons:
         reasons.append("여러 축에서 평균 이상 점수를 받아 관찰 우선순위가 높습니다.")
+    if evidence and len(reasons) < 4 and theme_gate_pass:
+        reasons.append(f"테마 근거: {evidence}")
     return reasons[:4]
 
 
@@ -3076,11 +3130,11 @@ def _html_table(frame: pd.DataFrame, bucket: str) -> str:
         return "<div class='subtle'>No rows</div>"
     rows: list[str] = []
     if bucket == "value":
-        columns = ["ticker", "name", "recommendation_bucket", "core_bucket", "sector", "size_bucket", "prev_close", "per", "peg", "roe_pct", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "final_score", "value_score", "estimate_revision_score", "tam_expansion_score", "ownership_flow_score", "policy_score", "payout_repeatability_score", "cashflow_quality_score", "governance_warning_score", "investability_score", "dividend_potential_score", "business_quality_score", "liquidity_support_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "recommendation_bucket", "core_bucket", "theme", "theme_confidence", "sector", "size_bucket", "prev_close", "per", "peg", "roe_pct", "pbr", "dividend_yield_trailing", "dividend_yield_normalized", "returns_6m_pct", "final_score", "value_score", "estimate_revision_score", "tam_expansion_score", "ownership_flow_score", "policy_score", "payout_repeatability_score", "cashflow_quality_score", "governance_warning_score", "investability_score", "dividend_potential_score", "business_quality_score", "liquidity_support_score", "stage", "tags", "missing_data"]
     elif bucket == "special_dividend":
         columns = ["ticker", "name", "sector", "prev_close", "dividend_yield_trailing", "dividend_yield_normalized", "dividend_gap_pct", "dividends_3y", "tags"]
     else:
-        columns = ["ticker", "name", "sector", "size_bucket", "prev_close", "per", "pbr", "returns_6m_pct", "high_52w_ratio_pct", "growth_early_score", "value_score", "stage", "tags", "missing_data"]
+        columns = ["ticker", "name", "theme", "theme_confidence", "sector", "size_bucket", "prev_close", "per", "pbr", "returns_6m_pct", "high_52w_ratio_pct", "growth_early_score", "value_score", "stage", "tags", "missing_data"]
 
     for row in frame[columns].itertuples(index=False, name=None):
         rendered = []
@@ -3104,6 +3158,12 @@ def _records_for_ui(frame: pd.DataFrame) -> list[dict[str, object]]:
         "market",
         "name",
         "sector",
+        "theme",
+        "sub_theme",
+        "theme_score",
+        "theme_confidence",
+        "theme_gate_pass",
+        "theme_evidence",
         "size_bucket",
         "prev_close",
         "per",
