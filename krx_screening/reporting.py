@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from html import escape
 
 import pandas as pd
@@ -84,13 +84,18 @@ def _write_validation_outputs(settings: Settings) -> None:
 
 def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
     files = sorted(settings.data_dir.glob("screened_*.csv"))
-    snapshots: list[tuple[str, pd.DataFrame]] = []
+    snapshots: list[tuple[date, str, pd.DataFrame]] = []
     for path in files:
         try:
             frame = pd.read_csv(path, encoding="utf-8-sig")
         except Exception:
             continue
-        snapshots.append((path.stem.replace("screened_", ""), _normalize_frame(frame)))
+        date_text = path.stem.replace("screened_", "")
+        try:
+            asof_date = date.fromisoformat(date_text)
+        except ValueError:
+            continue
+        snapshots.append((asof_date, date_text, _normalize_frame(frame)))
 
     if len(snapshots) < 3:
         return None
@@ -99,8 +104,13 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
     theme_rows: list[dict[str, object]] = []
     observations: list[dict[str, object]] = []
 
-    latest_date, latest_frame = snapshots[-1]
+    latest_asof, latest_date, latest_frame = snapshots[-1]
     latest_prices = _validation_price_map(latest_frame)
+    holding_periods = [
+        ("week_1", 7, "1주"),
+        ("month_1", 30, "1개월"),
+        ("month_3", 90, "3개월"),
+    ]
 
     bucket_filters = [
         ("Value Core", lambda frame: frame["core_bucket"].fillna("") == "Value Core"),
@@ -112,8 +122,8 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
         ("가치함정 경고", lambda frame: frame["recommendation_bucket"].fillna("") == "가치함정 경고"),
     ]
 
-    for index, (asof_date, frame) in enumerate(snapshots[:-1]):
-        next_date, next_frame = snapshots[index + 1]
+    for index, (asof_dt, asof_date, frame) in enumerate(snapshots[:-1]):
+        next_dt, next_date, next_frame = snapshots[index + 1]
         next_prices = _validation_price_map(next_frame)
         source = frame.copy()
         source["theme"] = source["theme"].fillna("미분류").replace("", "미분류")
@@ -128,28 +138,54 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
             source[source["recommendation_bucket"].fillna("") != "제외"],
             latest_prices,
         )
+        holding_targets = {
+            key: _nearest_snapshot_for_horizon(snapshots, index, asof_dt + timedelta(days=days))
+            for key, days, _ in holding_periods
+        }
 
         for bucket_name, bucket_filter in bucket_filters:
             bucket_frame = source[bucket_filter(source)]
             next_stats = _compute_bucket_return(bucket_frame, next_prices)
             latest_stats = _compute_bucket_return(bucket_frame, latest_prices)
-            bucket_rows.append(
-                {
-                    "asof_date": asof_date,
-                    "bucket": bucket_name,
-                    "count": int(len(bucket_frame)),
-                    "next_date": next_date,
-                    "next_return": next_stats["avg_return"],
-                    "next_hit_rate": next_stats["positive_rate"],
-                    "next_coverage": next_stats["coverage"],
-                    "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
-                    "latest_date": latest_date,
-                    "latest_return": latest_stats["avg_return"],
-                    "latest_hit_rate": latest_stats["positive_rate"],
-                    "latest_coverage": latest_stats["coverage"],
-                    "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
-                }
-            )
+            row = {
+                "asof_date": asof_date,
+                "bucket": bucket_name,
+                "count": int(len(bucket_frame)),
+                "next_date": next_date,
+                "next_return": next_stats["avg_return"],
+                "next_hit_rate": next_stats["positive_rate"],
+                "next_coverage": next_stats["coverage"],
+                "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
+                "latest_date": latest_date,
+                "latest_return": latest_stats["avg_return"],
+                "latest_hit_rate": latest_stats["positive_rate"],
+                "latest_coverage": latest_stats["coverage"],
+                "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
+            }
+            for key, _, label in holding_periods:
+                target = holding_targets[key]
+                if target is None:
+                    row[f"{key}_date"] = ""
+                    row[f"{key}_return"] = None
+                    row[f"{key}_hit_rate"] = None
+                    row[f"{key}_outperformance"] = None
+                    continue
+                _, target_date_text, target_frame = target
+                target_prices = _validation_price_map(target_frame)
+                target_stats = _compute_bucket_return(bucket_frame, target_prices)
+                target_benchmark = _compute_bucket_return(
+                    source[source["recommendation_bucket"].fillna("") != "제외"],
+                    target_prices,
+                )
+                row[f"{key}_date"] = target_date_text
+                row[f"{key}_return"] = target_stats["avg_return"]
+                row[f"{key}_hit_rate"] = target_stats["positive_rate"]
+                row[f"{key}_outperformance"] = (
+                    target_stats["avg_return"] - target_benchmark["avg_return"]
+                    if target_stats["coverage"] and target_benchmark["coverage"]
+                    else None
+                )
+            bucket_rows.append(row)
 
         themed = source[
             (source["recommendation_bucket"].fillna("") != "제외")
@@ -159,19 +195,39 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
         for theme, group in themed.groupby("theme", dropna=False):
             next_stats = _compute_bucket_return(group, next_prices)
             latest_stats = _compute_bucket_return(group, latest_prices)
-            theme_rows.append(
-                {
-                    "asof_date": asof_date,
-                    "theme": str(theme),
-                    "count": int(len(group)),
-                    "next_return": next_stats["avg_return"],
-                    "next_hit_rate": next_stats["positive_rate"],
-                    "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
-                    "latest_return": latest_stats["avg_return"],
-                    "latest_hit_rate": latest_stats["positive_rate"],
-                    "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
-                }
-            )
+            row = {
+                "asof_date": asof_date,
+                "theme": str(theme),
+                "count": int(len(group)),
+                "next_return": next_stats["avg_return"],
+                "next_hit_rate": next_stats["positive_rate"],
+                "next_outperformance": next_stats["avg_return"] - benchmark["avg_return"] if next_stats["coverage"] and benchmark["coverage"] else None,
+                "latest_return": latest_stats["avg_return"],
+                "latest_hit_rate": latest_stats["positive_rate"],
+                "latest_outperformance": latest_stats["avg_return"] - benchmark_latest["avg_return"] if latest_stats["coverage"] and benchmark_latest["coverage"] else None,
+            }
+            for key, _, _ in holding_periods:
+                target = holding_targets[key]
+                if target is None:
+                    row[f"{key}_return"] = None
+                    row[f"{key}_hit_rate"] = None
+                    row[f"{key}_outperformance"] = None
+                    continue
+                _, _, target_frame = target
+                target_prices = _validation_price_map(target_frame)
+                target_stats = _compute_bucket_return(group, target_prices)
+                target_benchmark = _compute_bucket_return(
+                    source[source["recommendation_bucket"].fillna("") != "제외"],
+                    target_prices,
+                )
+                row[f"{key}_return"] = target_stats["avg_return"]
+                row[f"{key}_hit_rate"] = target_stats["positive_rate"]
+                row[f"{key}_outperformance"] = (
+                    target_stats["avg_return"] - target_benchmark["avg_return"]
+                    if target_stats["coverage"] and target_benchmark["coverage"]
+                    else None
+                )
+            theme_rows.append(row)
 
         top_picks = source[
             source["recommendation_bucket"].fillna("").isin(["실매수 검토", "소액 관찰"])
@@ -202,13 +258,24 @@ def _build_validation_payload(settings: Settings) -> dict[str, object] | None:
 
     return {
         "snapshot_count": len(snapshots),
-        "date_range": f"{snapshots[0][0]} ~ {snapshots[-1][0]}",
+        "date_range": f"{snapshots[0][1]} ~ {snapshots[-1][1]}",
         "latest_date": latest_date,
         "bucket_summary": bucket_summary,
         "theme_summary": theme_summary,
         "observations": observations_frame,
-        "note": "거래일이 연속적이지 않아 '다음 스냅샷' 기준 성과와 '최신 스냅샷까지 보유' 성과를 함께 봅니다.",
+        "note": "거래일이 연속적이지 않아 1주·1개월·3개월은 목표일 이후 가장 가까운 저장 스냅샷으로 계산했습니다.",
     }
+
+
+def _nearest_snapshot_for_horizon(
+    snapshots: list[tuple[date, str, pd.DataFrame]],
+    current_index: int,
+    target_date: date,
+) -> tuple[date, str, pd.DataFrame] | None:
+    for future_date, future_label, future_frame in snapshots[current_index + 1:]:
+        if future_date >= target_date:
+            return (future_date, future_label, future_frame)
+    return None
 
 
 def _validation_price_map(frame: pd.DataFrame) -> dict[str, float]:
@@ -250,6 +317,15 @@ def _aggregate_validation_rows(frame: pd.DataFrame, key: str, min_count: int = 1
             next_return=("next_return", "mean"),
             next_hit_rate=("next_hit_rate", "mean"),
             next_outperformance=("next_outperformance", "mean"),
+            week_1_return=("week_1_return", "mean"),
+            week_1_hit_rate=("week_1_hit_rate", "mean"),
+            week_1_outperformance=("week_1_outperformance", "mean"),
+            month_1_return=("month_1_return", "mean"),
+            month_1_hit_rate=("month_1_hit_rate", "mean"),
+            month_1_outperformance=("month_1_outperformance", "mean"),
+            month_3_return=("month_3_return", "mean"),
+            month_3_hit_rate=("month_3_hit_rate", "mean"),
+            month_3_outperformance=("month_3_outperformance", "mean"),
             latest_return=("latest_return", "mean"),
             latest_hit_rate=("latest_hit_rate", "mean"),
             latest_outperformance=("latest_outperformance", "mean"),
@@ -262,8 +338,8 @@ def _aggregate_validation_rows(frame: pd.DataFrame, key: str, min_count: int = 1
 
 
 def _build_validation_markdown(payload: dict[str, object]) -> str:
-    bucket_summary = payload["bucket_summary"]
-    theme_summary = payload["theme_summary"]
+    bucket_summary = _format_validation_summary(payload["bucket_summary"])
+    theme_summary = _format_validation_summary(payload["theme_summary"])
     observations = payload["observations"]
     lines = [
         "# KRX Screening Validation",
@@ -289,8 +365,8 @@ def _build_validation_html(payload: dict[str, object]) -> str:
     bucket_summary: pd.DataFrame = payload["bucket_summary"]  # type: ignore[assignment]
     theme_summary: pd.DataFrame = payload["theme_summary"]  # type: ignore[assignment]
     observations: pd.DataFrame = payload["observations"]  # type: ignore[assignment]
-    bucket_table = bucket_summary.to_html(index=False, classes="data-table", border=0, justify="left") if not bucket_summary.empty else "<div class='empty'>데이터 없음</div>"
-    theme_table = theme_summary.head(20).to_html(index=False, classes="data-table", border=0, justify="left") if not theme_summary.empty else "<div class='empty'>데이터 없음</div>"
+    bucket_table = _format_validation_summary(bucket_summary).to_html(index=False, classes="data-table", border=0, justify="left") if not bucket_summary.empty else "<div class='empty'>데이터 없음</div>"
+    theme_table = _format_validation_summary(theme_summary.head(20)).to_html(index=False, classes="data-table", border=0, justify="left") if not theme_summary.empty else "<div class='empty'>데이터 없음</div>"
     observation_table = observations.to_html(index=False, classes="data-table", border=0, justify="left") if not observations.empty else "<div class='empty'>데이터 없음</div>"
     bucket_cards = _validation_stat_cards_html(bucket_summary, key_column="bucket")
     theme_cards = _validation_stat_cards_html(theme_summary.head(10), key_column="theme")
@@ -437,15 +513,18 @@ def _build_validation_html(payload: dict[str, object]) -> str:
 
 def _validation_metric_cards_html(bucket_summary: pd.DataFrame, theme_summary: pd.DataFrame) -> str:
     cards: list[tuple[str, str, str]] = []
+    best_week_bucket = _best_validation_row(bucket_summary, primary_metric="week_1_outperformance", fallback_metric="week_1_return")
+    best_month_bucket = _best_validation_row(bucket_summary, primary_metric="month_1_outperformance", fallback_metric="month_1_return")
     best_bucket = _best_validation_row(bucket_summary)
-    worst_bucket = _worst_validation_row(bucket_summary)
     best_theme = _best_validation_row(theme_summary)
     total_themes = str(len(theme_summary.index)) if not theme_summary.empty else "0"
 
+    if best_week_bucket is not None:
+        cards.append(("Best 1주 Bucket", str(best_week_bucket.iloc[0]), _fmt_signed(best_week_bucket.get("week_1_outperformance"))))
+    if best_month_bucket is not None:
+        cards.append(("Best 1개월 Bucket", str(best_month_bucket.iloc[0]), _fmt_signed(best_month_bucket.get("month_1_outperformance"))))
     if best_bucket is not None:
-        cards.append(("Best Bucket", str(best_bucket.iloc[0]), _fmt_signed(best_bucket.get("latest_outperformance"))))
-    if worst_bucket is not None:
-        cards.append(("Weakest Bucket", str(worst_bucket.iloc[0]), _fmt_signed(worst_bucket.get("latest_outperformance"))))
+        cards.append(("Best Latest Bucket", str(best_bucket.iloc[0]), _fmt_signed(best_bucket.get("latest_outperformance"))))
     if best_theme is not None:
         cards.append(("Best Theme", str(best_theme.iloc[0]), _fmt_signed(best_theme.get("latest_outperformance"))))
     cards.append(("Tracked Themes", total_themes, "관측 테마 수"))
@@ -468,6 +547,7 @@ def _validation_stat_cards_html(frame: pd.DataFrame, key_column: str) -> str:
         return "<div class='empty'>데이터 없음</div>"
     best = _best_validation_row(frame)
     worst = _worst_validation_row(frame)
+    best_month = _best_validation_row(frame, primary_metric="month_1_outperformance", fallback_metric="month_1_return")
     items: list[str] = []
     if best is not None:
         items.append(
@@ -483,19 +563,35 @@ def _validation_stat_cards_html(frame: pd.DataFrame, key_column: str) -> str:
         for row in top_rows.itertuples(index=False)
     ]
     items.append(f"<div style='margin-top:12px;'><strong>Top 3</strong><ol class='mini-list'>{''.join(extra)}</ol></div>")
+    if best_month is not None:
+        items.append(
+            f"<div style='margin-top:12px;'><strong>1개월 최고</strong><ol class='mini-list'><li>{escape(str(best_month.iloc[0]))} · 초과수익 {escape(_fmt_signed(best_month.get('month_1_outperformance')))} · 적중률 {escape(_fmt_percent(best_month.get('month_1_hit_rate')))}</li></ol></div>"
+        )
     return "".join(items)
 
 
-def _best_validation_row(frame: pd.DataFrame) -> pd.Series | None:
+def _best_validation_row(
+    frame: pd.DataFrame,
+    primary_metric: str = "latest_outperformance",
+    fallback_metric: str = "latest_return",
+) -> pd.Series | None:
     if frame.empty:
         return None
-    return frame.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[False, False, False]).iloc[0]
+    if primary_metric not in frame.columns or fallback_metric not in frame.columns:
+        return None
+    candidates = frame.dropna(subset=[primary_metric, fallback_metric], how="all")
+    if candidates.empty:
+        return None
+    return candidates.sort_values(by=[primary_metric, fallback_metric, "observations"], ascending=[False, False, False]).iloc[0]
 
 
 def _worst_validation_row(frame: pd.DataFrame) -> pd.Series | None:
     if frame.empty:
         return None
-    return frame.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[True, True, False]).iloc[0]
+    candidates = frame.dropna(subset=["latest_outperformance", "latest_return"], how="all")
+    if candidates.empty:
+        return None
+    return candidates.sort_values(by=["latest_outperformance", "latest_return", "observations"], ascending=[True, True, False]).iloc[0]
 
 
 def _fmt_signed(value: object) -> str:
@@ -509,6 +605,40 @@ def _fmt_signed(value: object) -> str:
 def _fmt_percent(value: object) -> str:
     numeric = _num(value)
     return f"{numeric:.1f}%"
+
+
+def _format_validation_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    rename_map = {
+        "bucket": "버킷",
+        "theme": "테마",
+        "observations": "관측수",
+        "next_return": "익일수익률",
+        "next_hit_rate": "익일적중률",
+        "next_outperformance": "익일초과수익",
+        "week_1_return": "1주수익률",
+        "week_1_hit_rate": "1주적중률",
+        "week_1_outperformance": "1주초과수익",
+        "month_1_return": "1개월수익률",
+        "month_1_hit_rate": "1개월적중률",
+        "month_1_outperformance": "1개월초과수익",
+        "month_3_return": "3개월수익률",
+        "month_3_hit_rate": "3개월적중률",
+        "month_3_outperformance": "3개월초과수익",
+        "latest_return": "최신누적수익률",
+        "latest_hit_rate": "최신적중률",
+        "latest_outperformance": "최신초과수익",
+    }
+    render = frame.rename(columns=rename_map).copy()
+    numeric_columns = [column for column in render.columns if column not in {"버킷", "테마"}]
+    for column in numeric_columns:
+        if pd.api.types.is_numeric_dtype(render[column]):
+            if column == "관측수":
+                render[column] = render[column].apply(lambda value: "" if pd.isna(value) else int(round(float(value), 0)))
+            else:
+                render[column] = render[column].apply(lambda value: "" if pd.isna(value) else round(float(value), 2))
+    return render
 
 
 def _frame_to_markdown_table(frame: pd.DataFrame) -> str:
